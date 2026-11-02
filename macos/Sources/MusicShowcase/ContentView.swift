@@ -13,7 +13,7 @@ struct ContentView: View {
     @State private var baseURLString = "http://localhost:8080"
     @State private var token = ""
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var libraryError: ErrorCode?
     @State private var needsToken = false
 
     var body: some View {
@@ -29,10 +29,24 @@ struct ContentView: View {
             .formStyle(.grouped)
             .frame(height: 132)
             if needsToken {
-                Text("Server returned 401 \u{2014} enter the token (MUSIC_TOKEN on the server) and load again.").foregroundStyle(.red).padding(.horizontal)
-            } else if let errorMessage {
-                Text(errorMessage).foregroundStyle(.red).padding(.horizontal)
+                let entry = libraryError?.entry ?? ErrorCode.unauthorized.entry
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.title).bold()
+                    Text(entry.message)
+                }.padding(.horizontal)
+            } else if let libraryError {
+                ErrorBanner(code: libraryError) { action in
+                    if action == "retry" { Task { await load() } } else { self.libraryError = nil }
+                }
             }
+            if player.tracks.isEmpty && libraryError == nil && !isLoading {
+                VStack(spacing: 8) {
+                    Text(ErrorCode.emptyLibrary.entry.title).font(.headline)
+                    Text(ErrorCode.emptyLibrary.entry.message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
             List(player.tracks) { track in
                 HStack {
                     VStack(alignment: .leading) {
@@ -46,7 +60,17 @@ struct ContentView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { start(track) }
             }
+            }
             Divider()
+            if let e = player.playbackError {
+                ErrorBanner(code: e) { action in
+                    switch action {
+                    case "retry": player.retryPlayback()
+                    case "skip-track": player.skipAfterError()
+                    default: player.dismissPlaybackError()
+                    }
+                }
+            }
             bottomBar
         }
         .frame(minWidth: 640, minHeight: 480)
@@ -85,22 +109,29 @@ struct ContentView: View {
     }
 
     private func load() async {
-        guard let baseURL = URL(string: baseURLString) else { errorMessage = "Invalid server URL: \(baseURLString)"; return }
+        guard let baseURL = URL(string: baseURLString) else { libraryError = .serverUnreachable; return }
         isLoading = true
         defer { isLoading = false }
         let client = APIClient(baseURL: baseURL, token: token)
         player.token = token
         player.baseURL = baseURL
-        do {
-            player.tracks = try await client.tracks()
-            needsToken = false
-            errorMessage = nil
-        } catch APIClientError.unauthorized {
-            needsToken = true
-            errorMessage = nil
-        } catch {
-            needsToken = false
-            errorMessage = "Could not load tracks: \(error.localizedDescription)"
+        var attempt = 0
+        while true {
+            do {
+                player.tracks = try await client.tracks()
+                needsToken = false
+                libraryError = nil
+                return
+            } catch {
+                let code = ErrorCode.classify(error, loaded: !player.tracks.isEmpty)
+                libraryError = code
+                needsToken = code == .unauthorized || code == .unauthorizedMidSession
+                let entry = code.entry
+                guard entry.autoRetry, code != .unauthorized, code != .unauthorizedMidSession, code != .malformedResponse, attempt < entry.maxAttempts, !entry.backoffMs.isEmpty else { return }
+                let delayMs = entry.backoffMs[min(attempt, entry.backoffMs.count - 1)]
+                attempt += 1
+                try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+            }
         }
     }
 }
