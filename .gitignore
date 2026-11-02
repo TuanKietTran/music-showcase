@@ -1,0 +1,13 @@
+target/
+node_modules/
+dist/
+.build/
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+server/data/
+.env
+.env.*

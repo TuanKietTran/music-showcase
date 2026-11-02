@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release policy: no cleartext anywhere. The debug variant of this file
+     (src/debug/res/xml/) additionally allows 10.0.2.2 / localhost only. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
