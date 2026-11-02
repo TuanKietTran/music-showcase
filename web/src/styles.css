@@ -16,3 +16,13 @@ main{padding:0 var(--sp-6);display:grid;gap:var(--sp-6);max-width:1100px;margin:
 .notice{background:var(--surface);padding:var(--sp-4);border-radius:var(--r-lg)}form.token{display:flex;gap:var(--sp-2);flex-wrap:wrap}input[type='password'],input[type='range']{accent-color:var(--accent)}form.token input{font:inherit;padding:var(--sp-2);border-radius:var(--r-sm);border:1px solid var(--muted);background:var(--bg);color:var(--text)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+.errbanner{display:flex;gap:var(--sp-3);align-items:center;padding:var(--sp-3) var(--sp-4);background:var(--surface);color:var(--text);font-size:var(--fs-sm);border-radius:var(--r-md);border-left:4px solid var(--accent);animation:errin var(--dur) ease}
+.errbanner.sev-info{border-left:4px dotted var(--muted)}
+.errbanner.sev-warning{border-left:4px dashed var(--accent)}
+.errbanner.sev-error{border-left:4px solid var(--accent)}
+.errbanner.sev-blocking{border-left:4px double var(--accent)}
+.errbanner button{background:var(--surface2);color:var(--text);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);font-size:var(--fs-sm);flex-shrink:0}
+.toast{position:fixed;bottom:148px;left:var(--sp-4);right:var(--sp-4);background:var(--surface2);color:var(--text);border-radius:var(--r-md);padding:var(--sp-3) var(--sp-4);font-size:var(--fs-sm);animation:errin var(--dur) ease}
+@keyframes errin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion: reduce){.errbanner,.toast{animation:none}}
+.errbanner{flex-wrap:wrap}.errbanner p{margin:0}.playerr{position:fixed;left:var(--sp-4);right:var(--sp-4);bottom:140px;z-index:5}
