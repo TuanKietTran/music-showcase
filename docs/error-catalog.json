@@ -1,0 +1,276 @@
+[
+ {
+  "code": "server-unreachable",
+  "trigger": "fetch/URLSession fails before any HTTP response (offline, refused, DNS)",
+  "severity": "error",
+  "surface": "inline-banner",
+  "title": "Can't reach the server",
+  "message": "We couldn't connect to the music server. Check that it is running and that you are online, then try again.",
+  "actions": [
+   "retry",
+   "change-server",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": true,
+   "maxAttempts": 3,
+   "backoffMs": [
+    1000,
+    2000,
+    4000
+   ]
+  },
+  "announce": "assertive"
+ },
+ {
+  "code": "request-timeout",
+  "trigger": "request exceeds the client timeout (15 s) with no response",
+  "severity": "warning",
+  "surface": "inline-banner",
+  "title": "The server is taking too long",
+  "message": "The server didn't answer in time. Your library is still here. Try again in a moment.",
+  "actions": [
+   "retry",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": true,
+   "maxAttempts": 3,
+   "backoffMs": [
+    1000,
+    2000,
+    4000
+   ]
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "unauthorized",
+  "trigger": "HTTP 401 while loading the library (no valid token yet)",
+  "severity": "blocking",
+  "surface": "blocking-dialog",
+  "title": "Access token needed",
+  "message": "This server needs an access token before it will share music. Enter the token to continue.",
+  "actions": [
+   "enter-token",
+   "change-server"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "assertive"
+ },
+ {
+  "code": "unauthorized-mid-session",
+  "trigger": "HTTP 401 after the library was loaded (token changed or expired)",
+  "severity": "blocking",
+  "surface": "blocking-dialog",
+  "title": "Please sign in again",
+  "message": "The server no longer accepts your token. Enter it again to keep listening. Your queue and position are kept.",
+  "actions": [
+   "enter-token",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "assertive"
+ },
+ {
+  "code": "track-not-found",
+  "trigger": "HTTP 404 on stream or metadata for a track",
+  "severity": "warning",
+  "surface": "toast",
+  "title": "Track unavailable",
+  "message": "This track is no longer on the server, so we can't play it. You can skip to the next one.",
+  "actions": [
+   "skip-track",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "bad-range",
+  "trigger": "HTTP 416 on a Range request (seek past the end or stale length)",
+  "severity": "warning",
+  "surface": "toast",
+  "title": "Couldn't jump to that spot",
+  "message": "We couldn't seek to that point in the track. Playback restarts from where you were.",
+  "actions": [
+   "retry",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": true,
+   "maxAttempts": 1,
+   "backoffMs": [
+    500
+   ]
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "server-error",
+  "trigger": "HTTP 5xx from any API route",
+  "severity": "error",
+  "surface": "inline-banner",
+  "title": "The server had a problem",
+  "message": "Something went wrong on the server's side. Nothing you did caused it. Try again shortly.",
+  "actions": [
+   "retry",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": true,
+   "maxAttempts": 3,
+   "backoffMs": [
+    1000,
+    3000,
+    8000
+   ]
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "malformed-response",
+  "trigger": "response body cannot be parsed (JSON decode failure, wrong shape)",
+  "severity": "error",
+  "surface": "inline-banner",
+  "title": "Unexpected reply from the server",
+  "message": "The server sent something we couldn't read. Trying again may help; if not, the server may need an update.",
+  "actions": [
+   "retry",
+   "change-server",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "audio-decode-failed",
+  "trigger": "MediaError code 3/4, AVPlayerItem failed with decode/format error, ExoPlayer decoder error",
+  "severity": "error",
+  "surface": "toast",
+  "title": "This track won't play",
+  "message": "We couldn't play this track's audio. Your queue is unchanged, so you can skip to the next track.",
+  "actions": [
+   "skip-track",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "stream-stalled",
+  "trigger": "playback buffer empty for more than 5 s while the network is reachable",
+  "severity": "info",
+  "surface": "inline-banner",
+  "title": "Still loading the music",
+  "message": "The music is taking a while to load. We'll keep trying and resume from the same spot.",
+  "actions": [
+   "retry",
+   "skip-track"
+  ],
+  "retry": {
+   "auto": true,
+   "maxAttempts": 3,
+   "backoffMs": [
+    2000,
+    4000,
+    8000
+   ]
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "connection-lost-during-playback",
+  "trigger": "network error or offline event while a track is streaming",
+  "severity": "warning",
+  "surface": "inline-banner",
+  "title": "Connection lost",
+  "message": "Playback paused because the connection dropped. We'll resume from the same spot when you're back online.",
+  "actions": [
+   "retry",
+   "skip-track",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": true,
+   "maxAttempts": 3,
+   "backoffMs": [
+    1000,
+    2000,
+    4000
+   ]
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "cover-load-failed",
+  "trigger": "cover image request fails for any reason",
+  "severity": "info",
+  "surface": "toast",
+  "title": "Cover art unavailable",
+  "message": "Cover art couldn't be loaded. A placeholder is shown instead.",
+  "actions": [],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "polite",
+  "silent": true
+ },
+ {
+  "code": "empty-library",
+  "trigger": "library request succeeds with zero tracks (not an error)",
+  "severity": "info",
+  "surface": "empty-state",
+  "title": "No music yet",
+  "message": "The library is empty. Add some tracks on the server and refresh.",
+  "actions": [
+   "retry"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "polite"
+ },
+ {
+  "code": "unknown",
+  "trigger": "any failure that matches no other code",
+  "severity": "error",
+  "surface": "inline-banner",
+  "title": "Something went wrong",
+  "message": "Something unexpected happened. Try again, and your library and queue will stay as they are.",
+  "actions": [
+   "retry",
+   "dismiss"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "polite"
+ }
+]
