@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { blobUrl, fetchTracks, type Track } from './api';
+import { blobUrl, classifyProbed, fetchTracks, type Track } from './api';
 import { CATALOG, classify, classifyMedia, type ErrorCode } from './errors';
 import { policyFor, sleep, withRetry } from './retry';
 import ErrorBanner from './ErrorBanner';
@@ -8,7 +8,7 @@ const fmt = (s: number) => (!isFinite(s) || s < 0 ? '0:00' : `${Math.floor(s / 6
 export default function App() {
   const [token, setToken] = useState(''); const [tokenInput, setTokenInput] = useState('');
   const [tracks, setTracks] = useState<Track[]>([]); const [covers, setCovers] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false); const [libError, setLibError] = useState<ErrorCode | null>(null); const [playError, setPlayError] = useState<ErrorCode | null>(null); const loadedRef = useRef(false); const resumeAt = useRef(0); const retryRun = useRef(0); const [needsToken, setNeedsToken] = useState(true);
+  const [loading, setLoading] = useState(false); const [libError, setLibError] = useState<ErrorCode | null>(null); const [playError, setPlayError] = useState<ErrorCode | null>(null); const loadedRef = useRef(false); const resumeAt = useRef(0); const retryRun = useRef(0); const [needsToken, setNeedsToken] = useState(false);
   const [idx, setIdx] = useState<number | null>(null); const [playing, setPlaying] = useState(false); const [buffering, setBuffering] = useState(false);
   const [time, setTime] = useState(0); const [dur, setDur] = useState(0); const [volume, setVolume] = useState(0.8);
   const [shuffle, setShuffle] = useState(false); const [repeat, setRepeat] = useState<Repeat>('off');
@@ -16,16 +16,17 @@ export default function App() {
   const audioRef = useRef<HTMLAudioElement>(null); const preloadRef = useRef<HTMLAudioElement>(null); const wantPlay = useRef(false);
   const current = idx !== null ? tracks[idx] : undefined;
   useEffect(() => { if (theme === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = theme; }, [theme]);
-  const load = useCallback(async (tok: string) => {
+  const load = useCallback(async (tok: string, submitted = false) => {
     setLoading(true); setLibError(null);
     try { const list = await withRetry(() => fetchTracks(tok), policyFor('server-unreachable'), { shouldRetry: (e) => { const c = classify(e); return c !== 'unauthorized' && c !== 'malformed-response'; } });
       setTracks(list); setNeedsToken(false); loadedRef.current = true;
       // cover failures are silent: fall back to an empty src (cover-load-failed has no banner)
       const entries = await Promise.all(list.map(async (t) => [t.id, await blobUrl(t.coverUrl, tok).catch(() => '')] as const)); setCovers(Object.fromEntries(entries));
-    } catch (e) { const code = classify(e, { loaded: loadedRef.current }); if (code === 'unauthorized' || code === 'unauthorized-mid-session') setNeedsToken(true); setLibError(code); } // tracks are never cleared on error
+    } catch (e) { const code = await classifyProbed(e, { loaded: loadedRef.current, tokenSubmitted: submitted && tok !== '' }); setNeedsToken(code === 'unauthorized' || code === 'unauthorized-mid-session' || code === 'token-rejected'); setLibError(code); } // tracks are never cleared on error
     setLoading(false);
   }, []);
   const playAt = useCallback((i: number, autoplay = true) => { wantPlay.current = autoplay; setIdx(i); }, []);
+  useEffect(() => { void load(''); }, [load]); // first load shows the library, the unreachable banner, or (only after a 401) the token gate
   const step = useCallback((dir: 1 | -1) => {
     if (!tracks.length) return;
     if (shuffle && dir === 1 && tracks.length > 1) { let n = idx ?? 0; while (n === (idx ?? 0)) n = Math.floor(Math.random() * tracks.length); playAt(n); return; }
@@ -78,7 +79,7 @@ export default function App() {
     <header className="site"><h1>Music Showcase</h1><button type="button" onClick={() => setTheme((t) => (t === 'auto' ? 'dark' : t === 'dark' ? 'light' : 'auto'))} aria-label="Toggle colour theme">Theme: {theme}</button></header>
     <main>
       <p className="sr" aria-live="polite">{current ? `Now playing ${current.title} by ${current.artist}` : ''}</p>
-      {needsToken && (<section className="notice" aria-labelledby="tokh"><h2 id="tokh">{CATALOG[libError === 'unauthorized-mid-session' ? libError : 'unauthorized'].title}</h2><p className="muted" role="alert">{CATALOG[libError === 'unauthorized-mid-session' ? libError : 'unauthorized'].message}</p><form className="token" onSubmit={(e) => { e.preventDefault(); setToken(tokenInput); void load(tokenInput); }}><label htmlFor="token">Token</label><input id="token" type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} autoComplete="off" /><button type="submit">Connect</button></form></section>)}
+      {needsToken && (<section className="notice" aria-labelledby="tokh"><h2 id="tokh">{CATALOG[libError === 'unauthorized-mid-session' ? libError : 'unauthorized'].title}</h2><p className="muted" role="alert">{CATALOG[libError === 'unauthorized-mid-session' ? libError : 'unauthorized'].message}</p><form className="token" onSubmit={(e) => { e.preventDefault(); setToken(tokenInput); void load(tokenInput, true); }}><label htmlFor="token">Token</label><input id="token" type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} autoComplete="off" /><button type="submit">Connect</button></form></section>)}
       {libError && !needsToken && <ErrorBanner code={libError} onAction={(a) => (a === 'retry' ? void load(token) : setLibError(null))} />}
       {loading && (<section aria-label="Loading tracks"><div className="grid">{[1, 2, 3, 4].map((n) => <div key={n} className="skel" />)}</div></section>)}
       {!loading && !needsToken && tracks.length === 0 && !libError && (<section className="notice"><h2>{CATALOG['empty-library'].title}</h2><p className="muted" role="status">{CATALOG['empty-library'].message}</p></section>)}
