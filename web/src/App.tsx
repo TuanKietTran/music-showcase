@@ -77,6 +77,8 @@ export default function App() {
   const startStall = () => { setBuffering(true); if (stallTimer.current === null) stallTimer.current = window.setTimeout(() => { stallTimer.current = null; if (audioRef.current) resumeAt.current = audioRef.current.currentTime; setPlayError((e) => e ?? 'stream-stalled'); }, 5000); };
   const stopStall = () => { if (stallTimer.current !== null) { window.clearTimeout(stallTimer.current); stallTimer.current = null; } setPlayError((e) => (e === 'stream-stalled' ? null : e)); };
   useEffect(() => () => { if (stallTimer.current !== null) window.clearTimeout(stallTimer.current); }, []);
+  const barRef = useRef<HTMLElement>(null); // keep --bar-h equal to the real player bar height so nothing hides behind it
+  useEffect(() => { const el = barRef.current; if (!el) return; const set = () => document.documentElement.style.setProperty('--bar-h', `${el.offsetHeight}px`); set(); const ro = new ResizeObserver(set); ro.observe(el); return () => ro.disconnect(); }, []);
   const onEnded = () => { if (repeat === 'one') { const a = audioRef.current; if (a) { a.currentTime = 0; void a.play(); } return; } if (idx !== null && idx === tracks.length - 1 && repeat === 'off' && !shuffle) { setPlaying(false); return; } step(1); };
   const readBuffered = () => { const a = audioRef.current; if (!a || !a.duration) return; const out: { start: number; end: number }[] = []; for (let i = 0; i < a.buffered.length; i++) out.push({ start: a.buffered.start(i), end: a.buffered.end(i) }); setBuffered(out); };
   return (<>
@@ -90,10 +92,11 @@ export default function App() {
       {current && (<section className="np" aria-labelledby="nph"><img src={covers[current.id]} alt={`Cover art for ${current.title}`} /><div><h2 id="nph">{current.title}</h2><p className="muted">{current.artist} · {fmt(current.durationSec)} · {current.sampleRate / 1000} kHz / {current.bitDepth}-bit</p><h3>Queue</h3><ol className="queue">{tracks.map((t, i) => (<li key={t.id}><button type="button" onClick={() => playAt(i)} aria-current={i === idx}> {i + 1}. {t.title} — {t.artist}</button></li>))}</ol></div></section>)}
       {!loading && tracks.length > 0 && (<section aria-labelledby="listh"><h2 id="listh">Tracks</h2><div className="grid">{tracks.map((t, i) => (<button key={t.id} type="button" className="card" onClick={() => playAt(i)} aria-current={i === idx} aria-label={`Play ${t.title} by ${t.artist}`}><img src={covers[t.id]} alt="" /><h3>{t.title}</h3><span className="muted">{t.artist} · {fmt(t.durationSec)}</span></button>))}</div></section>)}
     </main>
-    {playError && <div className="playerr"><ErrorBanner code={playError} onAction={(a) => (a === 'skip-track' ? step(1) : a === 'retry' ? retryPlayback() : setPlayError(null))} /></div>}
-    <footer className="player" aria-label="Player">
+
+    <footer className="player" aria-label="Player" ref={barRef}>
       <audio ref={audioRef} preload="auto" onError={(e) => { resumeAt.current = e.currentTarget.currentTime; setPlaying(false); setBuffering(false); setPlayError(classifyMedia(e.currentTarget.error)); }} onPlaying={() => { stopStall(); setPlayError(null); }} onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); stopStall(); }} onEnded={onEnded} onTimeUpdate={(e) => { setTime(e.currentTarget.currentTime); readBuffered(); }} onLoadedMetadata={(e) => setDur(e.currentTarget.duration)} onWaiting={startStall} onStalled={startStall} onCanPlay={() => { setBuffering(false); stopStall(); }} onProgress={readBuffered} />
       <audio ref={preloadRef} preload="auto" hidden aria-hidden="true" />
+      {playError && <ErrorBanner code={playError} onAction={(a) => (a === 'skip-track' ? step(1) : a === 'retry' ? retryPlayback() : setPlayError(null))} />}
       <div className="row"><strong>{current ? current.title : 'Nothing selected'}</strong><span className="muted">{current?.artist ?? ''}</span>{buffering && <span className="spinner" role="status" aria-label="Buffering" />}
         <button type="button" onClick={() => step(-1)} aria-label="Previous track">⏮</button>
         <button type="button" onClick={() => { const a = audioRef.current; if (!a) return; if (idx === null && tracks.length) { playAt(0); return; } if (a.paused) void a.play(); else a.pause(); }} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '⏸' : '▶'}</button>
