@@ -73,6 +73,10 @@ export default function App() {
       else if (e.key === 'n') step(1); else if (e.key === 'p') step(-1); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   });
+  const stallTimer = useRef<number | null>(null); // stream-stalled appears only after 5 s of waiting
+  const startStall = () => { setBuffering(true); if (stallTimer.current === null) stallTimer.current = window.setTimeout(() => { stallTimer.current = null; if (audioRef.current) resumeAt.current = audioRef.current.currentTime; setPlayError((e) => e ?? 'stream-stalled'); }, 5000); };
+  const stopStall = () => { if (stallTimer.current !== null) { window.clearTimeout(stallTimer.current); stallTimer.current = null; } setPlayError((e) => (e === 'stream-stalled' ? null : e)); };
+  useEffect(() => () => { if (stallTimer.current !== null) window.clearTimeout(stallTimer.current); }, []);
   const onEnded = () => { if (repeat === 'one') { const a = audioRef.current; if (a) { a.currentTime = 0; void a.play(); } return; } if (idx !== null && idx === tracks.length - 1 && repeat === 'off' && !shuffle) { setPlaying(false); return; } step(1); };
   const readBuffered = () => { const a = audioRef.current; if (!a || !a.duration) return; const out: { start: number; end: number }[] = []; for (let i = 0; i < a.buffered.length; i++) out.push({ start: a.buffered.start(i), end: a.buffered.end(i) }); setBuffered(out); };
   return (<>
@@ -88,7 +92,7 @@ export default function App() {
     </main>
     {playError && <div className="playerr"><ErrorBanner code={playError} onAction={(a) => (a === 'skip-track' ? step(1) : a === 'retry' ? retryPlayback() : setPlayError(null))} /></div>}
     <footer className="player" aria-label="Player">
-      <audio ref={audioRef} preload="auto" onError={(e) => { resumeAt.current = e.currentTarget.currentTime; setPlaying(false); setBuffering(false); setPlayError(classifyMedia(e.currentTarget.error)); }} onPlaying={() => setPlayError(null)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={onEnded} onTimeUpdate={(e) => { setTime(e.currentTarget.currentTime); readBuffered(); }} onLoadedMetadata={(e) => setDur(e.currentTarget.duration)} onWaiting={() => setBuffering(true)} onStalled={() => setBuffering(true)} onCanPlay={() => setBuffering(false)} onProgress={readBuffered} />
+      <audio ref={audioRef} preload="auto" onError={(e) => { resumeAt.current = e.currentTarget.currentTime; setPlaying(false); setBuffering(false); setPlayError(classifyMedia(e.currentTarget.error)); }} onPlaying={() => { stopStall(); setPlayError(null); }} onPlay={() => setPlaying(true)} onPause={() => { setPlaying(false); stopStall(); }} onEnded={onEnded} onTimeUpdate={(e) => { setTime(e.currentTarget.currentTime); readBuffered(); }} onLoadedMetadata={(e) => setDur(e.currentTarget.duration)} onWaiting={startStall} onStalled={startStall} onCanPlay={() => { setBuffering(false); stopStall(); }} onProgress={readBuffered} />
       <audio ref={preloadRef} preload="auto" hidden aria-hidden="true" />
       <div className="row"><strong>{current ? current.title : 'Nothing selected'}</strong><span className="muted">{current?.artist ?? ''}</span>{buffering && <span className="spinner" role="status" aria-label="Buffering" />}
         <button type="button" onClick={() => step(-1)} aria-label="Previous track">⏮</button>
