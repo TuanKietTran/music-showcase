@@ -61,11 +61,17 @@ extension ErrorCode {
         return .unknown
     }
     static func classifyPlayback(_ error: Error?) -> ErrorCode {
-        if let u = error as? URLError {
-            switch u.code {
-            case .notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .networkConnectionLost: return .connectionLostDuringPlayback
-            default: break
+        // AVFoundation wraps the network error as an underlying NSError; walk the chain.
+        var current: NSError? = error as NSError?
+        while let e = current {
+            if e.domain == NSURLErrorDomain {
+                switch e.code {
+                case NSURLErrorNotConnectedToInternet, NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut: return .connectionLostDuringPlayback
+                case NSURLErrorBadServerResponse: return .serverError
+                default: break
+                }
             }
+            current = e.userInfo[NSUnderlyingErrorKey] as? NSError
         }
         return .audioDecodeFailed
     }
