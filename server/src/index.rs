@@ -9,6 +9,7 @@ pub struct UploadRow {
     pub key: String, pub format: String, pub bytes: u64, pub duration_sec: u64, pub created_at: u64,
 }
 
+#[allow(dead_code)] // read only by the DynamoDB persistence (feature aws)
 pub enum Change<'a> { Put(&'a UploadRow), Delete(&'a UploadRow) }
 
 pub enum Persist {

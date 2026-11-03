@@ -13,6 +13,7 @@ pub trait ObjectApi: Send + Sync + 'static {
     fn complete_multipart(&self, key: &str, upload_id: &str, parts: Vec<(i32, String)>) -> impl Future<Output = Result<(), StoreError>> + Send;
     fn abort_multipart(&self, key: &str, upload_id: &str) -> impl Future<Output = Result<(), StoreError>> + Send;
     fn get(&self, key: &str, range: Option<(u64, u64)>) -> impl Future<Output = Result<mpsc::Receiver<io::Result<Vec<u8>>>, StoreError>> + Send;
+    #[allow(dead_code)]
     fn head(&self, key: &str) -> impl Future<Output = Result<Option<u64>, StoreError>> + Send;
     fn delete_object(&self, key: &str) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
@@ -67,6 +68,7 @@ impl<C: ObjectApi> S3Store<C> {
         Ok(Body::Chan(self.client.get(key, range).await?))
     }
     pub async fn delete(&self, key: &str) -> Result<(), StoreError> { parse_key(key)?; self.client.delete_object(key).await }
+    #[allow(dead_code)]
     pub async fn stat(&self, key: &str) -> Result<Option<u64>, StoreError> { parse_key(key)?; self.client.head(key).await }
 }
 

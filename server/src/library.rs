@@ -26,6 +26,7 @@ pub fn content_type_for_format(format: &str) -> &'static str {
         _ => "application/octet-stream",
     }
 }
+#[cfg(test)]
 impl Track {
     pub fn content_type(&self) -> &'static str { content_type_for_format(&self.format) }
 }

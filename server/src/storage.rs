@@ -145,6 +145,7 @@ impl Storage {
             Storage::Fake(s) => s.delete(key).await,
         }
     }
+    #[allow(dead_code)] // part of the storage contract; used by tests and operators
     pub async fn stat(&self, key: &str) -> Result<Option<u64>, StoreError> {
         match self {
             Storage::Local(l) => match tokio::fs::metadata(l.path(key)?).await { Ok(m) => Ok(Some(m.len())), Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None), Err(e) => Err(e.into()) },

@@ -14,7 +14,7 @@ use tokio::{io::{AsyncReadExt, AsyncWriteExt, BufReader}, net::TcpStream, sync::
 pub struct Config { pub origin: String, pub max_upload_bytes: u64, pub trust_proxy: bool, pub upload_timeout: Duration }
 pub struct Ctx { pub cfg: Config, pub tracks: Vec<Track>, pub policy: Policy, pub auth: Auth, pub storage: Storage, pub index: Mutex<Index>, pub slots: Semaphore }
 
-pub enum Payload { None, Bytes(Vec<u8>), Body(Body, u64), File { path: PathBuf, start: u64, len: u64 } }
+pub enum Payload { None, Bytes(Vec<u8>), Body(Body), File { path: PathBuf, start: u64, len: u64 } }
 pub struct Reply { pub code: u16, pub headers: Vec<(String, String)>, pub payload: Payload, pub close: bool }
 
 pub fn reason(code: u16) -> &'static str {
@@ -49,7 +49,7 @@ pub async fn write_reply(w: &mut TcpStream, r: Reply, head_only: bool) -> io::Re
     match r.payload {
         Payload::None => {}
         Payload::Bytes(b) => w.write_all(&b).await?,
-        Payload::Body(mut body, _) => { while let Some(chunk) = body.next_chunk().await { w.write_all(&chunk?).await?; } }
+        Payload::Body(mut body) => { while let Some(chunk) = body.next_chunk().await { w.write_all(&chunk?).await?; } }
         Payload::File { path, start, len } => {
             let mut stdf = std::fs::File::open(&path)?;
             std::io::Seek::seek(&mut stdf, std::io::SeekFrom::Start(start))?;
@@ -211,7 +211,7 @@ async fn stream(ctx: &Ctx, req: &Request, who: &Account, id: &str, secure: bool,
     h.extend(cors.iter().cloned());
     if head { return reply(code, h, Payload::None); }
     let payload = match (&v.key, &v.file) {
-        (Some(key), _) => match ctx.storage.open(key, Some((start, end))).await { Ok(b) => Payload::Body(b, len), Err(StoreError::NotFound) => return err(404, "not_found", cors), Err(e) => { eprintln!("storage open failed: {:?}", e); return err(500, "storage_error", cors); } },
+        (Some(key), _) => match ctx.storage.open(key, Some((start, end))).await { Ok(b) => Payload::Body(b), Err(StoreError::NotFound) => return err(404, "not_found", cors), Err(e) => { eprintln!("storage open failed: {:?}", e); return err(500, "storage_error", cors); } },
         (None, Some(path)) => Payload::File { path: path.clone(), start, len },
         _ => return err(404, "not_found", cors),
     };
@@ -317,4 +317,14 @@ pub(crate) fn test_ctx(storage: Storage, accounts: Vec<(&str, &str, &str, u64)>,
     let entries = accounts.iter().map(|(id, role, token, quota)| (Account { id: id.to_string(), name: id.to_string(), role: role.to_string(), status: if id.starts_with("susp") { "suspended".into() } else { "active".into() }, quota_bytes: *quota, unlimited: false }, sha256_hex(token.as_bytes()))).collect();
     Ctx { cfg: Config { origin: "http://localhost:5173".into(), max_upload_bytes: max_upload, trust_proxy: false, upload_timeout: Duration::from_secs(20) }, tracks: vec![], policy: Policy::default_policy(),
           auth: Auth { accounts: Accounts::new("boot-token", entries), #[cfg(feature = "aws")] oidc: None }, storage, index: Mutex::new(crate::index::mem()), slots: Semaphore::new(4) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn req(headers: &[(&str, &str)]) -> Request { Request { method: "GET".into(), target: "/api/tracks".into(), version: "HTTP/1.1".into(), headers: headers.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() } }
+    #[test] fn bearer_parsing() {
+        assert_eq!(bearer_token(&req(&[])), None); assert_eq!(bearer_token(&req(&[("Authorization", "Basic abc")])), None);
+        assert_eq!(bearer_token(&req(&[("Authorization", "Bearer ")])), None); assert_eq!(bearer_token(&req(&[("authorization", "Bearer s3cret")])), Some("s3cret"));
+    }
 }

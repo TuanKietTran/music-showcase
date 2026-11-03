@@ -50,7 +50,6 @@ impl Accounts {
         }
         hit
     }
-    pub fn len(&self) -> usize { self.entries.len() }
 }
 
 /// Parse accounts.tsv: id, name, role, status, quotaBytes, tokenSha256. Errors carry the line number.
