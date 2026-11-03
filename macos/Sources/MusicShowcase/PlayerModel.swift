@@ -24,6 +24,7 @@ final class PlayerModel: ObservableObject {
     private var timeObserver: Any?
     private var retryAttempt = 0
     private var retryTask: Task<Void, Never>?
+    private var stallTask: Task<Void, Never>?
     private var resumeAt: Double = 0
     private var statusObserver: NSKeyValueObservation?
     private var noteObservers: [NSObjectProtocol] = []
@@ -56,6 +57,7 @@ final class PlayerModel: ObservableObject {
                     self.duration = d.isFinite ? d : 0
                 }
                 self.isPlaying = self.player.timeControlStatus == .playing
+                if self.player.timeControlStatus == .playing { self.stallTask?.cancel(); self.stallTask = nil }
                 if self.isPlaying && self.playbackError == .streamStalled { self.playbackError = nil; self.retryAttempt = 0 }
                 self.isBuffering = self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             }
@@ -91,6 +93,7 @@ final class PlayerModel: ObservableObject {
 
     private func observeItem(_ item: AVPlayerItem) {
         statusObserver?.invalidate()
+        stallTask?.cancel()
         noteObservers.forEach { NotificationCenter.default.removeObserver($0) }
         noteObservers = []
         statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -111,10 +114,16 @@ final class PlayerModel: ObservableObject {
             guard let self else { return }
             Task { @MainActor in
                 self.resumeAt = self.position
-                self.playbackError = .streamStalled
-                self.isPlaying = false
-                self.isBuffering = false
-                self.scheduleAutoRetry(for: .streamStalled)
+                self.isBuffering = true
+                self.stallTask?.cancel()
+                self.stallTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    guard let self, !Task.isCancelled, self.player.timeControlStatus != .playing else { return }
+                    self.playbackError = .streamStalled
+                    self.isPlaying = false
+                    self.isBuffering = false
+                    self.scheduleAutoRetry(for: .streamStalled)
+                }
             }
         })
         noteObservers.append(NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] notification in
