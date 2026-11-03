@@ -1,27 +1,19 @@
-mod http; mod library; mod range;
-use http::{constant_time_eq, parse_request_head, Request};
-use library::{ensure_library, generated_cover_svg, json_escape, load_dir, Track};
-use std::{io::Seek, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
-use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, net::{TcpListener, TcpStream}, sync::Semaphore};
-struct Config { token: String, origin: String }
-fn reason(code: u16) -> &'static str { match code { 200=>"OK", 204=>"No Content", 206=>"Partial Content", 304=>"Not Modified", 400=>"Bad Request", 401=>"Unauthorized", 404=>"Not Found", 405=>"Method Not Allowed", 416=>"Range Not Satisfiable", 500=>"Internal Server Error", 503=>"Service Unavailable", _=>"OK" } }
-struct Ctx { cfg: Arc<Config>, tracks: Arc<Vec<Track>> }
-fn cors_headers(req: &Request, cfg: &Config) -> Vec<(String, String)> {
-    match req.header("Origin") { Some(o) if o == cfg.origin => vec![("Access-Control-Allow-Origin".into(), o.to_string()), ("Vary".into(), "Origin".into())], _ => vec![] }
-}
-async fn write_head<W: AsyncWriteExt + Unpin>(w: &mut W, code: u16, mut headers: Vec<(String, String)>) -> std::io::Result<()> {
-    if !headers.iter().any(|(n,_)| n.eq_ignore_ascii_case("X-Content-Type-Options")) { headers.push(("X-Content-Type-Options".into(), "nosniff".into())); }
-    let mut s = format!("HTTP/1.1 {} {}\r\n", code, reason(code));
-    for (n, v) in &headers { s.push_str(&format!("{}: {}\r\n", n, v)); }
-    s.push_str("\r\n"); w.write_all(s.as_bytes()).await
-}
-async fn send_json<W: AsyncWriteExt + Unpin>(w: &mut W, code: u16, body: &str, extra: Vec<(String,String)>, head_only: bool) -> std::io::Result<()> {
-    let mut h = vec![("Content-Type".into(), "application/json".into()), ("Content-Length".into(), body.len().to_string())]; h.extend(extra);
-    write_head(w, code, h).await?; if !head_only { w.write_all(body.as_bytes()).await?; } Ok(())
-}
-fn authorized(req: &Request, cfg: &Config) -> bool {
-    match req.header("Authorization") { Some(v) => match v.strip_prefix("Bearer ") { Some(t) => constant_time_eq(t.as_bytes(), cfg.token.as_bytes()), None => false }, None => false }
-}
+mod accounts; mod api; mod auth; mod http; mod index; mod library; mod media; mod policy; mod range; mod s3store; mod storage;
+#[cfg(feature = "aws")]
+mod cognito;
+#[cfg(feature = "aws")]
+mod ddb;
+#[cfg(feature = "aws")]
+mod s3_sdk;
+use accounts::{parse_accounts, sha256_hex, Accounts};
+use api::{cors_headers, json_reply, route, write_reply, Config, Ctx};
+use http::parse_request_head;
+use library::{ensure_library, load_dir};
+use policy::Policy;
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use storage::Storage;
+use tokio::{io::{AsyncBufReadExt, BufReader}, net::{TcpListener, TcpStream}, sync::{Mutex, Semaphore}};
+
 async fn read_head(reader: &mut BufReader<TcpStream>) -> Result<Option<Vec<u8>>, ()> {
     let fut = async {
         let mut head: Vec<u8> = Vec::new(); let mut lines = 0usize;
@@ -40,94 +32,98 @@ async fn read_head(reader: &mut BufReader<TcpStream>) -> Result<Option<Vec<u8>>,
     };
     match tokio::time::timeout(Duration::from_secs(10), fut).await { Ok(r) => r, Err(_) => Err(()) }
 }
-async fn handle(mut reader: BufReader<TcpStream>, ctx: Arc<Ctx>, _peer: SocketAddr) {
+
+async fn handle(mut reader: BufReader<TcpStream>, ctx: Arc<Ctx>) {
     loop {
-        let head = match read_head(&mut reader).await { Ok(Some(h)) => h, Ok(None) => return, Err(_) => { let w = reader.get_mut(); let _ = send_json(w, 400, "{\"error\":\"bad_request\"}", vec![], false).await; return; } };
-        let req = match parse_request_head(&head) { Ok(r) => r, Err(_) => { let w = reader.get_mut(); let _ = send_json(w, 400, "{\"error\":\"bad_request\"}", vec![], false).await; return; } };
+        let head = match read_head(&mut reader).await { Ok(Some(h)) => h, Ok(None) => return, Err(_) => { let _ = write_reply(reader.get_mut(), json_reply(400, "{\"error\":\"bad_request\"}", vec![]), false).await; return; } };
+        let req = match parse_request_head(&head) { Ok(r) => r, Err(_) => { let _ = write_reply(reader.get_mut(), json_reply(400, "{\"error\":\"bad_request\"}", vec![]), false).await; return; } };
         let keep = if req.version == "HTTP/1.1" { !matches!(req.header("Connection"), Some(v) if v.eq_ignore_ascii_case("close")) } else { matches!(req.header("Connection"), Some(v) if v.eq_ignore_ascii_case("keep-alive")) };
         let cors = cors_headers(&req, &ctx.cfg);
-        let w = reader.get_mut();
-        let path = req.path().to_string(); let method = req.method.clone(); let head_only = method == "HEAD";
-        if method == "OPTIONS" && path.starts_with("/api") {
-            let mut h = cors.clone(); h.push(("Access-Control-Allow-Methods".into(), "GET, HEAD, OPTIONS".into())); h.push(("Access-Control-Allow-Headers".into(), "Authorization, Range, Content-Type".into())); h.push(("Access-Control-Max-Age".into(), "86400".into())); h.push(("Content-Length".into(), "0".into()));
-            if write_head(w, 204, h).await.is_err() { return; }
-        } else if !(method == "GET" || method == "HEAD") {
-            if send_json(w, 405, "{\"error\":\"method_not_allowed\"}", cors.clone(), false).await.is_err() { return; }
-        } else if path == "/api/health" {
-            if send_json(w, 200, "{\"status\":\"ok\"}", cors.clone(), head_only).await.is_err() { return; }
-        } else if !path.starts_with("/api/") {
-            if send_json(w, 404, "{\"error\":\"not_found\"}", cors.clone(), head_only).await.is_err() { return; }
-        } else if !authorized(&req, &ctx.cfg) {
-            let mut extra = cors.clone(); extra.push(("WWW-Authenticate".into(), "Bearer".into()));
-            if send_json(w, 401, "{\"error\":\"unauthorized\"}", extra, head_only).await.is_err() { return; }
-        } else if path == "/api/tracks" {
-            let mut body = String::from("[");
-            for (i, t) in ctx.tracks.iter().enumerate() { if i > 0 { body.push(','); } let format_part = format!(",\"format\":\"{}\"", json_escape(&t.format)); let license_part = match &t.license { Some(v) => format!(",\"license\":\"{}\"", json_escape(v)), None => String::new() }; let source_part = match &t.source { Some(v) => format!(",\"source\":\"{}\"", json_escape(v)), None => String::new() }; body.push_str(&format!("{{\"id\":\"{}\",\"title\":\"{}\",\"artist\":\"{}\",\"durationSec\":{},\"sampleRate\":{},\"bitDepth\":{},\"bytes\":{},\"coverUrl\":\"/api/tracks/{}/cover\",\"streamUrl\":\"/api/tracks/{}/stream\"{}{}{}}}", t.id, json_escape(&t.title), json_escape(&t.artist), t.duration_sec, t.sample_rate, t.bit_depth, t.bytes, t.id, t.id, format_part, license_part, source_part)); }
-            body.push(']');
-            let mut extra = cors.clone(); extra.push(("Cache-Control".into(), "no-store".into()));
-            if send_json(w, 200, &body, extra, head_only).await.is_err() { return; }
-        } else if let Some(rest) = path.strip_prefix("/api/tracks/") {
-            // rest is "{id}/stream" or "{id}/cover"; id lookup only, never a filesystem path.
-            let mut parts = rest.splitn(2, '/'); let id = parts.next().unwrap_or(""); let action = parts.next().unwrap_or("");
-            let track = ctx.tracks.iter().find(|t| t.id == id);
-            match (track, action) {
-                (Some(t), "cover") => {
-                    let data = match &t.cover { Some(path) => match tokio::fs::read(path).await { Ok(d) => d, Err(_) => { let _ = send_json(w, 500, "{\"error\":\"cover_missing\"}", cors.clone(), head_only).await; return; } }, None => generated_cover_svg(&t.title, &t.artist).into_bytes() };
-                    let mut h = vec![("Content-Type".into(), "image/svg+xml".into()), ("Content-Length".into(), data.len().to_string())]; h.extend(cors.clone());
-                    if write_head(w, 200, h).await.is_err() { return; } if !head_only && w.write_all(&data).await.is_err() { return; }
-                }
-                (Some(t), "stream") => {
-                    let etag = format!("\"{}-{}-{}\"", t.id, t.bytes, t.duration_sec);
-                    if req.header("If-None-Match") == Some(etag.as_str()) { let mut h = vec![("ETag".into(), etag.clone()), ("Content-Length".into(), "0".into())]; h.extend(cors.clone()); if write_head(w, 304, h).await.is_err() { return; } }
-                    else {
-                        let (start, end, code) = if let Some(rh) = req.header("Range") { match range::parse_range(rh, t.bytes) { Ok(r) => (r.start, r.end, 206), Err(()) => { let mut extra = cors.clone(); extra.push(("Content-Range".into(), format!("bytes */{}", t.bytes))); extra.push(("Accept-Ranges".into(), "bytes".into())); if send_json(w, 416, "{\"error\":\"range_not_satisfiable\"}", extra, head_only).await.is_err() { return; } if !keep { return; } continue; } } } else { (0, t.bytes - 1, 200) };
-                        let len = end - start + 1;
-                        let mut h = vec![("Content-Type".into(), t.content_type().to_string()), ("Content-Length".into(), len.to_string()), ("Accept-Ranges".into(), "bytes".into()), ("ETag".into(), etag)]; if code == 206 { h.push(("Content-Range".into(), format!("bytes {}-{}/{}", start, end, t.bytes))); } h.extend(cors.clone());
-                        if write_head(w, code, h).await.is_err() { return; }
-                        if !head_only {
-                            // Stream from disk in bounded chunks; stop on disconnect (write error).
-                            let mut stdf = match std::fs::File::open(&t.file) { Ok(f) => f, Err(_) => return };
-                            if stdf.seek(std::io::SeekFrom::Start(start)).is_err() { return; }
-                            let mut file = tokio::fs::File::from_std(stdf);
-                            let mut remaining = len; let mut buf = vec![0u8; 16384];
-                            while remaining > 0 { let want = remaining.min(buf.len() as u64) as usize; match file.read(&mut buf[..want]).await { Ok(0) => break, Ok(n) => { if w.write_all(&buf[..n]).await.is_err() { return; } remaining -= n as u64; } Err(_) => return } }
-                        }
-                    }
-                }
-                _ => { if send_json(w, 404, "{\"error\":\"not_found\"}", cors.clone(), head_only).await.is_err() { return; } }
-            }
-        } else {
-            if send_json(w, 404, "{\"error\":\"not_found\"}", cors.clone(), head_only).await.is_err() { return; }
+        let head_only = req.method == "HEAD";
+        let reply = if req.method == "OPTIONS" && req.path().starts_with("/api") {
+            let mut h = cors.clone();
+            h.push(("Access-Control-Allow-Methods".into(), "GET, HEAD, POST, PATCH, DELETE, OPTIONS".into())); h.push(("Access-Control-Allow-Headers".into(), "Authorization, Range, Content-Type".into()));
+            h.push(("Access-Control-Max-Age".into(), "86400".into())); h.push(("Content-Length".into(), "0".into()));
+            api::Reply { code: 204, headers: h, payload: api::Payload::None, close: false }
+        } else { route(&ctx, &req, &mut reader, &cors).await };
+        let close = reply.close;
+        if write_reply(reader.get_mut(), reply, head_only).await.is_err() { return; }
+        if close {
+            // Lingering close: tell the client we are done, then discard (a bounded amount of) the unread request body,
+            // so an early 403/413/415 reaches the client instead of being replaced by a TCP reset.
+            let _ = tokio::io::AsyncWriteExt::shutdown(reader.get_mut()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(3), tokio::io::copy(&mut tokio::io::AsyncReadExt::take(&mut reader, 8 * 1024 * 1024), &mut tokio::io::sink())).await;
+            return;
         }
         if !keep { return; }
     }
 }
-#[tokio::main(flavor = "multi_thread")]
-async fn main() {
-    let token = match std::env::var("MUSIC_TOKEN") { Ok(v) if !v.is_empty() => v, _ => { eprintln!("error: MUSIC_TOKEN env var is required (no default)"); std::process::exit(2); } };
-    let origin = std::env::var("MUSIC_ORIGIN").unwrap_or_else(|_| "http://localhost:5173".to_string());
-    let port: u16 = std::env::var("MUSIC_PORT").ok().and_then(|v| v.parse().ok()).or_else(|| std::env::var("PORT").ok().and_then(|v| v.parse().ok())).unwrap_or(8080);
-    let tracks = match std::env::var("MUSIC_MEDIA_DIR") {
-        Ok(v) if !v.is_empty() => match load_dir(&PathBuf::from(v)) { Ok(t) => t, Err(e) => { eprintln!("error: cannot load media library: {}", e); std::process::exit(1); } },
-        _ => {
-            let data = std::env::var("MUSIC_DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("./data"));
-            match ensure_library(&data) { Ok(t) => t, Err(e) => { eprintln!("error: cannot seed library: {}", e); std::process::exit(1); } }
-        }
-    };
-    let ctx = Arc::new(Ctx { cfg: Arc::new(Config { token, origin }), tracks: Arc::new(tracks) });
-    let listener = match TcpListener::bind(("127.0.0.1", port)).await { Ok(l) => l, Err(e) => { eprintln!("error: bind {}: {}", port, e); std::process::exit(1); } };
-    println!("music-server listening on http://127.0.0.1:{} ({} tracks)", port, ctx.tracks.len());
+
+pub(crate) async fn serve(listener: TcpListener, ctx: Arc<Ctx>) {
     let sem = Arc::new(Semaphore::new(256));
     loop {
-        let (stream, peer) = match listener.accept().await { Ok(v) => v, Err(_) => continue };
+        let (stream, _peer) = match listener.accept().await { Ok(v) => v, Err(_) => continue };
         let permit = match sem.clone().try_acquire_owned() { Ok(p) => p, Err(_) => { drop(stream); continue; } };
         let c = ctx.clone();
-        tokio::spawn(async move { let _permit = permit; handle(BufReader::new(stream), c, peer).await; });
+        tokio::spawn(async move { let _permit = permit; handle(BufReader::new(stream), c).await; });
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn req(headers: &[(&str,&str)]) -> Request { Request { method: "GET".into(), target: "/api/tracks".into(), version: "HTTP/1.1".into(), headers: headers.iter().map(|(a,b)| (a.to_string(), b.to_string())).collect() } }
-    #[test] fn auth_rejection() { let cfg = Config { token: "s3cret".into(), origin: "http://localhost:5173".into() }; assert!(!authorized(&req(&[]), &cfg)); assert!(!authorized(&req(&[("Authorization","Bearer wrong")]), &cfg)); assert!(authorized(&req(&[("Authorization","Bearer s3cret")]), &cfg)); }
+
+fn fatal(msg: &str) -> ! { eprintln!("error: {}", msg); std::process::exit(1) }
+fn env(name: &str) -> Option<String> { std::env::var(name).ok().filter(|v| !v.is_empty()) }
+fn env_u64(name: &str, default: u64) -> u64 { match env(name) { None => default, Some(v) => v.parse().unwrap_or_else(|_| fatal(&format!("{} must be a number", name))) } }
+
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
+    if std::env::args().nth(1).as_deref() == Some("hash-token") { // token comes from stdin so it never appears in argv or shell history
+        let mut s = String::new(); let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s);
+        println!("{}", sha256_hex(s.trim_end_matches(['\n', '\r']).as_bytes())); return;
+    }
+    let token = env("MUSIC_TOKEN").unwrap_or_else(|| { eprintln!("error: MUSIC_TOKEN env var is required (no default)"); std::process::exit(2) });
+    let origin = env("MUSIC_ORIGIN").unwrap_or_else(|| "http://localhost:5173".to_string());
+    let port: u16 = env("MUSIC_PORT").and_then(|v| v.parse().ok()).or_else(|| env("PORT").and_then(|v| v.parse().ok())).unwrap_or(8080);
+    let bind = env("MUSIC_BIND").unwrap_or_else(|| "127.0.0.1".to_string());
+    let data = PathBuf::from(env("MUSIC_DATA_DIR").unwrap_or_else(|| "./data".to_string()));
+    let max_upload = env_u64("MUSIC_MAX_UPLOAD_BYTES", 104_857_600);
+    if let Err(e) = std::fs::create_dir_all(&data) { fatal(&format!("cannot create data dir: {}", e)); }
+    let tracks = match env("MUSIC_MEDIA_DIR") {
+        Some(v) => load_dir(&PathBuf::from(v)).unwrap_or_else(|e| fatal(&format!("cannot load media library: {}", e))),
+        None => ensure_library(&data).unwrap_or_else(|e| fatal(&format!("cannot seed library: {}", e))),
+    };
+    let policy = match env("MUSIC_POLICY_FILE") {
+        Some(p) => Policy::parse(&std::fs::read_to_string(&p).unwrap_or_else(|e| fatal(&format!("cannot read policy file: {}", e)))).unwrap_or_else(|e| fatal(&format!("policy file: {}", e))),
+        None => Policy::default_policy(),
+    };
+    let entries = match std::fs::read_to_string(data.join("accounts.tsv")) {
+        Ok(t) => parse_accounts(&t).unwrap_or_else(|e| fatal(&format!("accounts.tsv: {}", e))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+        Err(e) => fatal(&format!("cannot read accounts.tsv: {}", e)),
+    };
+    let accounts = Accounts::new(&token, entries);
+    let storage = match env("MUSIC_STORAGE").as_deref().unwrap_or("local") {
+        "local" => Storage::local(data.join("objects"), max_upload),
+        #[cfg(feature = "aws")]
+        "s3" => Storage::S3(s3_sdk::connect(max_upload).await.unwrap_or_else(|e| fatal(&e))),
+        #[cfg(not(feature = "aws"))]
+        "s3" => fatal("s3 backend not available in this build (rebuild with --features aws)"),
+        other => fatal(&format!("unknown MUSIC_STORAGE '{}' (local|s3)", other)),
+    };
+    let persist = match env("MUSIC_DDB_TABLE") {
+        #[cfg(feature = "aws")]
+        Some(table) => index::Persist::Ddb(ddb::DdbPersist::connect(&table).await),
+        #[cfg(not(feature = "aws"))]
+        Some(_) => fatal("MUSIC_DDB_TABLE needs a build with --features aws"),
+        None => index::Persist::File(data.join("uploads.tsv")),
+    };
+    let index = index::Index::open(persist).await.unwrap_or_else(|e| fatal(&format!("cannot load upload index: {}", e)));
+    let auth = auth::Auth { accounts, #[cfg(feature = "aws")] oidc: cognito::Oidc::from_env() };
+    let cfg = Config { origin, max_upload_bytes: max_upload, trust_proxy: env("MUSIC_TRUST_PROXY").as_deref() == Some("1"), upload_timeout: Duration::from_secs(env_u64("MUSIC_UPLOAD_TIMEOUT_SECS", 900)) };
+    let ctx = Arc::new(Ctx { cfg, tracks, policy, auth, storage, index: Mutex::new(index), slots: Semaphore::new(env_u64("MUSIC_MAX_CONCURRENT_UPLOADS", 4) as usize) });
+    let listener = TcpListener::bind((bind.as_str(), port)).await.unwrap_or_else(|e| fatal(&format!("bind {}:{}: {}", bind, port, e)));
+    let a = ctx.storage.attributes();
+    println!("music-server listening on http://{}:{} ({} built-in tracks, {} uploads, storage={}, {} policy rules)", bind, port, ctx.tracks.len(), ctx.index.lock().await.rows().len(), a.backend, ctx.policy.rule_count());
+    serve(listener, ctx).await;
 }
+
+#[cfg(test)]
+mod tests;

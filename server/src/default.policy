@@ -1,0 +1,9 @@
+# Default policy (docs/abac.md section 2). id | effect | actions | resource | conditions
+admin-all|permit|*|*|subject.role == "admin"
+read-public|permit|list,read,stream|track|resource.visibility == "public"
+read-own|permit|list,read,stream|track|resource.ownerId == subject.id
+upload|permit|upload|track|subject.role in ["uploader","admin"]; resource.bytes <= storage.remainingBytes
+edit-own|permit|update,delete|track|resource.ownerId == subject.id
+deny-suspended|deny|*|*|subject.status != "active"
+deny-oversize|deny|upload|track|resource.bytes > storage.maxObjectBytes
+deny-s3-unencrypted|deny|upload|track|storage.backend == "s3"; storage.encrypted != true

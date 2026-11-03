@@ -3,5 +3,29 @@ name = "music-server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Default build: local storage + bearer tokens only (tokio + sha2).
+# `--features aws` adds the S3 backend, the DynamoDB index and Cognito/OIDC JWT verification.
+default = []
+aws = [
+  "dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-sts", "dep:aws-sdk-dynamodb", "dep:aws-credential-types",
+  "dep:jsonwebtoken", "dep:reqwest", "dep:serde_json",
+]
+
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "fs", "time", "sync"] }
+sha2 = "0.10"
+aws-config = { version = "1", features = ["behavior-version-latest"], optional = true }
+aws-sdk-s3 = { version = "1", optional = true }
+aws-sdk-sts = { version = "1", optional = true }
+aws-sdk-dynamodb = { version = "1", optional = true }
+aws-credential-types = { version = "1", optional = true }
+jsonwebtoken = { version = "9", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+rsa = { version = "0.9", features = ["pem"] }
+
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
