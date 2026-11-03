@@ -22,13 +22,15 @@ struct ContentView: View {
                 TextField("Server", text: $baseURLString)
                 SecureField("Token", text: $token)
                 HStack {
-                    Button(isLoading ? "Loading\u{2026}" : "Load tracks") { Task { await load() } }.disabled(isLoading)
+                    Button(isLoading ? "Loading\u{2026}" : "Load tracks") { Task { await load(submitted: true) } }.disabled(isLoading)
                     if isLoading { ProgressView().controlSize(.small) }
                 }
             }
             .formStyle(.grouped)
             .frame(height: 132)
-            if needsToken {
+            if libraryError == .tokenRejected {
+                ErrorBanner(code: .tokenRejected) { _ in Task { await load(submitted: true) } }
+            } else if needsToken {
                 let entry = libraryError?.entry ?? ErrorCode.unauthorized.entry
                 VStack(alignment: .leading, spacing: 4) {
                     Text(entry.title).bold()
@@ -108,7 +110,7 @@ struct ContentView: View {
         player.play(track: track)
     }
 
-    private func load() async {
+    private func load(submitted: Bool = false) async {
         guard let baseURL = URL(string: baseURLString) else { libraryError = .serverUnreachable; return }
         isLoading = true
         defer { isLoading = false }
@@ -123,9 +125,10 @@ struct ContentView: View {
                 libraryError = nil
                 return
             } catch {
-                let code = ErrorCode.classify(error, loaded: !player.tracks.isEmpty)
+                var code = ErrorCode.classify(error, loaded: !player.tracks.isEmpty, submitted: submitted && !token.trimmingCharacters(in: .whitespaces).isEmpty)
+                if code == .serverError, !(await client.probeHealth()) { code = .serverUnreachable }
                 libraryError = code
-                needsToken = code == .unauthorized || code == .unauthorizedMidSession
+                needsToken = code == .unauthorized || code == .unauthorizedMidSession || code == .tokenRejected
                 let entry = code.entry
                 guard entry.autoRetry, code != .unauthorized, code != .unauthorizedMidSession, code != .malformedResponse, attempt < entry.maxAttempts, !entry.backoffMs.isEmpty else { return }
                 let delayMs = entry.backoffMs[min(attempt, entry.backoffMs.count - 1)]
