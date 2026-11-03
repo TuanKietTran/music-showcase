@@ -1,5 +1,5 @@
 import { HttpError, classify, type ErrorCode } from './errors';
-export interface Track { id: string; title: string; artist: string; durationSec: number; sampleRate: number; bitDepth: number; bytes: number; coverUrl: string; streamUrl: string; }
+export interface Track { id: string; title: string; artist: string; durationSec: number; sampleRate: number; bitDepth: number; bytes: number; coverUrl: string; streamUrl: string; format?: string; license?: string; source?: string; }
 export class AuthError extends Error { constructor(message?: string) { super(message); this.name = 'AuthError'; } }
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 export async function fetchTracks(token: string): Promise<Track[]> {

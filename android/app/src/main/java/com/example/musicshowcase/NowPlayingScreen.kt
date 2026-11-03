@@ -70,6 +70,10 @@ fun NowPlayingScreen(player: androidx.media3.common.Player, track: Track) {
         Text(track.title, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(track.artist, style = MaterialTheme.typography.bodyLarge)
+        if (track.sampleRate > 0) {
+            Spacer(Modifier.height(8.dp))
+            Text("${track.sampleRate / 1000.0} kHz / ${track.bitDepth}-bit", style = MaterialTheme.typography.bodyMedium)
+        }
         Spacer(Modifier.height(24.dp))
         if (isBuffering) {
             CircularProgressIndicator()

@@ -10,6 +10,9 @@ struct Track: Codable, Identifiable {
     let bytes: Int
     let coverUrl: String?
     let streamUrl: String
+    let format: String?
+    let license: String?
+    let source: String?
 
     /// Server returns root-relative paths (`/api/tracks/{id}/stream|cover`,
     /// docs/api.md); resolve them against the client base URL, like
@@ -30,7 +33,7 @@ struct Track: Codable, Identifiable {
         let streamPath = streamUrl.trimmingCharacters(in: .whitespaces).isEmpty ? "/api/tracks/\(id)/stream" : streamUrl
         let coverRaw = coverUrl?.trimmingCharacters(in: .whitespaces) ?? ""
         let coverPath = coverRaw.isEmpty ? "/api/tracks/\(id)/cover" : coverRaw
-        return Track(id: id, title: title, artist: artist, durationSec: durationSec, sampleRate: sampleRate, bitDepth: bitDepth, bytes: bytes, coverUrl: Self.resolve(baseURL: baseURL, path: coverPath), streamUrl: Self.resolve(baseURL: baseURL, path: streamPath))
+        return Track(id: id, title: title, artist: artist, durationSec: durationSec, sampleRate: sampleRate, bitDepth: bitDepth, bytes: bytes, coverUrl: Self.resolve(baseURL: baseURL, path: coverPath), streamUrl: Self.resolve(baseURL: baseURL, path: streamPath), format: format, license: license, source: source)
     }
 }
 

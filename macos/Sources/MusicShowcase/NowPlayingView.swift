@@ -12,6 +12,9 @@ struct NowPlayingView: View {
                     VStack(alignment: .leading) {
                         Text(track.title).font(.headline).lineLimit(1)
                         Text(track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        if !detailLine(track).isEmpty {
+                            Text(detailLine(track)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
                     }
                     if player.isBuffering { ProgressView().controlSize(.small) }
                     Spacer()
@@ -35,6 +38,14 @@ struct NowPlayingView: View {
             }
         }
         .padding(12)
+    }
+
+    private func detailLine(_ track: Track) -> String {
+        var parts: [String] = []
+        if track.sampleRate > 0 { parts.append(String(format: "%.1f kHz / %d-bit", Double(track.sampleRate) / 1000, track.bitDepth)) }
+        if let format = track.format, !format.isEmpty { parts.append(format.uppercased()) }
+        if let license = track.license, !license.isEmpty { parts.append(license) }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var coverImage: some View {
