@@ -35,7 +35,7 @@ export default function App() {
   useEffect(() => { // load stream for current track, then honour autoplay
     const a = audioRef.current; if (!a || idx === null || !current) return; let live = true;
     setBuffering(true);
-    blobUrl(current.streamUrl, token).then((url) => { if (!live) return; if (a.dataset.trackId !== current.id) { a.dataset.trackId = current.id; a.src = url; a.load(); } if (wantPlay.current) void a.play().catch(() => setPlaying(false)); }).catch((e) => { if (!live) return; setBuffering(false); setPlayError(classify(e, { playing: true })); });
+    blobUrl(current.streamUrl, token).then((url) => { if (!live) return; if (a.dataset.trackId !== current.id) { a.dataset.trackId = current.id; a.src = url; a.load(); } if (wantPlay.current) void a.play().catch(() => setPlaying(false)); }).catch(async (e) => { const c = await classifyProbed(e, { playing: true }); if (!live) return; setBuffering(false); setPlayError(c); });
     return () => { live = false; };
   }, [idx, current, token]);
   useEffect(() => { setPlayError(null); retryRun.current++; }, [idx]);
@@ -44,7 +44,7 @@ export default function App() {
     const url = await blobUrl(current.streamUrl, token); a.dataset.trackId = current.id; a.src = url; a.load();
     a.currentTime = resumeAt.current; await a.play();
   }, [current, token]);
-  const retryPlayback = useCallback(() => { retryRun.current++; setBuffering(true); reloadAudio().then(() => setPlayError(null)).catch((e) => { setBuffering(false); setPlayError(classify(e, { playing: true })); }); }, [reloadAudio]);
+  const retryPlayback = useCallback(() => { retryRun.current++; setBuffering(true); reloadAudio().then(() => setPlayError(null)).catch(async (e) => { const c = await classifyProbed(e, { playing: true }); setBuffering(false); setPlayError(c); }); }, [reloadAudio]);
   useEffect(() => { // auto-retry per catalog policy (never for 401/404/decode: their policy has auto=false)
     if (!playError) return; const pol = CATALOG[playError].retry; if (!pol.auto) return;
     const run = ++retryRun.current; let n = 0;
