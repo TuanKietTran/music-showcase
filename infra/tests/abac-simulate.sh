@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 ROLE=$(terraform output -raw writer_role_arn); BUCKET=$(terraform output -raw media_bucket)
 sim() { # <tag value or ""> <key> <action>
   local ctx=(); [ -n "$1" ] && ctx=(--context-entries "ContextKeyName=aws:PrincipalTag/accountId,ContextKeyValues=$1,ContextKeyType=string")
-  aws iam simulate-principal-policy --policy-source-arn "$ROLE" --action-names "$3" --resource-arns "arn:aws:s3:::$BUCKET/$2" "${ctx[@]}" \
+  aws iam simulate-principal-policy --policy-source-arn "$ROLE" --action-names "$3" --resource-arns "arn:aws:s3:::$BUCKET/$2" ${ctx[@]+"${ctx[@]}"} \
     --query 'EvaluationResults[0].EvalDecision' --output text
 }
 fail=0

@@ -19,7 +19,7 @@ mk() { { printf 'ID3\x04\x00\x00\x00\x00\x00\x00'; head -c $(($1-10)) /dev/urand
 mk 200000 "$W/a.mp3"; mk 120000 "$W/b.mp3"
 req() { # <tokenfile|-> <method> <path> [curl args...] -> prints http code; body in $W/body
   local tf="$1" m="$2" p="$3"; shift 3; local h=(); [ "$tf" != "-" ] && h=(-H "@$tf")
-  curl -sS -o "$W/body" -D "$W/hdr" -w '%{http_code}' -X "$m" "${h[@]}" "$@" "$APP_URL$p"
+  curl -sS -o "$W/body" -D "$W/hdr" -w '%{http_code}' -X "$m" ${h[@]+"${h[@]}"} "$@" "$APP_URL$p"
 }
 TA="$U/$ALICE.token"; TB="$U/$BOB.token"; TL="$U/$LISA.token"
 echo; echo "== API through CloudFront ($APP_URL)"
@@ -53,6 +53,15 @@ echo "      $(echo "$out" | head -1 | cut -c1-200)"
 check "request over plain HTTP (no TLS) is denied" 1 "$(echo "$out" | grep -c 'AccessDenied\|Forbidden\|403')"
 check "positive control: SSE-KMS put with the project key succeeds" 0 "$(aws s3api put-object --bucket "$MEDIA_BUCKET" --key accounts/verify-direct/0123456789abcdef.mp3 --body "$W/plain.txt" --server-side-encryption aws:kms --ssekms-key-id "$(tf_out kms_key_arn)" >/dev/null 2>&1; echo $?)"
 aws s3api delete-object --bucket "$MEDIA_BUCKET" --key accounts/verify-direct/0123456789abcdef.mp3 >/dev/null
+
+echo; echo "== multipart: 9 MiB (over the 8 MiB part size) as the bootstrap admin"
+mk 9437184 "$W/big.mp3"; printf 'Authorization: Bearer %s\n' "$(cat "$STATE_DIR/admin.token")" > "$W/admin.hdr"
+check "9 MiB upload -> 201" 201 "$(req "$W/admin.hdr" POST '/api/tracks?title=Big&artist=Admin&visibility=private' --data-binary @"$W/big.mp3")"
+BID="$(jq -r .id "$W/body")"; BOWN="$(jq -r .ownerId "$W/body")"
+check "stored size is 9437184 and SSE-KMS" "9437184 aws:kms" "$(aws s3api head-object --bucket "$MEDIA_BUCKET" --key "accounts/$BOWN/$BID.mp3" --query '[ContentLength,ServerSideEncryption]' --output text | tr '\t' ' ')"
+check "no multipart upload left open" 0 "$(aws s3api list-multipart-uploads --bucket "$MEDIA_BUCKET" --query 'length(Uploads||`[]`)' --output text)"
+check "Range across the part boundary -> 206" 206 "$(req "$W/admin.hdr" GET "/api/tracks/$BID/stream" -H 'Range: bytes=8388600-8388700')"
+check "admin deletes it -> 204" 204 "$(req "$W/admin.hdr" DELETE "/api/tracks/$BID")"
 
 echo; echo "== delete removes the current object"
 check "alice deletes her track -> 204" 204 "$(req "$TA" DELETE "/api/tracks/$ID")"

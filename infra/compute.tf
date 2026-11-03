@@ -16,6 +16,10 @@ resource "aws_cloudwatch_log_group" "server" {
 }
 
 # ---------------------------------------------------------------- network (default VPC, public subnets, no NAT gateway)
+locals {
+  # Two AZs are enough; every extra subnet is another billed public IPv4. The ALB and the Fargate service share this list.
+  service_subnets = slice(sort(data.aws_subnets.default.ids), 0, 2)
+}
 data "aws_ec2_managed_prefix_list" "cloudfront" { name = "com.amazonaws.global.cloudfront.origin-facing" }
 
 resource "aws_security_group" "alb" {
@@ -67,8 +71,8 @@ resource "aws_lb" "main" {
   load_balancer_type         = "application"
   internal                   = false
   security_groups            = [aws_security_group.alb.id]
-  subnets                    = slice(sort(data.aws_subnets.default.ids), 0, 2) # two AZs are enough; every extra subnet is another billed public IPv4
-  idle_timeout               = 300                                             # uploads and long range streams must not be cut by the default 60 s
+  subnets                    = local.service_subnets
+  idle_timeout               = 300 # uploads and long range streams must not be cut by the default 60 s
   drop_invalid_header_fields = true
 }
 
@@ -182,7 +186,7 @@ resource "aws_ecs_service" "server" {
     rollback = false
   }
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
+    subnets          = local.service_subnets # must equal the ALB's subnets: a task in an AZ the ALB does not serve is marked unhealthy
     security_groups  = [aws_security_group.task.id]
     assign_public_ip = true
   }
