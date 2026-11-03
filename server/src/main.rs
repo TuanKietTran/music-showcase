@@ -1,6 +1,6 @@
 mod http; mod library; mod range;
 use http::{constant_time_eq, parse_request_head, Request};
-use library::{ensure_library, json_escape, Track};
+use library::{ensure_library, generated_cover_svg, json_escape, load_dir, Track};
 use std::{io::Seek, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, net::{TcpListener, TcpStream}, sync::Semaphore};
 struct Config { token: String, origin: String }
@@ -62,7 +62,7 @@ async fn handle(mut reader: BufReader<TcpStream>, ctx: Arc<Ctx>, _peer: SocketAd
             if send_json(w, 401, "{\"error\":\"unauthorized\"}", extra, head_only).await.is_err() { return; }
         } else if path == "/api/tracks" {
             let mut body = String::from("[");
-            for (i, t) in ctx.tracks.iter().enumerate() { if i > 0 { body.push(','); } body.push_str(&format!("{{\"id\":\"{}\",\"title\":\"{}\",\"artist\":\"{}\",\"durationSec\":{},\"sampleRate\":{},\"bitDepth\":16,\"bytes\":{},\"coverUrl\":\"/api/tracks/{}/cover\",\"streamUrl\":\"/api/tracks/{}/stream\"}}", t.id, json_escape(t.title), json_escape(t.artist), t.duration_sec, library::SAMPLE_RATE, t.bytes, t.id, t.id)); }
+            for (i, t) in ctx.tracks.iter().enumerate() { if i > 0 { body.push(','); } let format_part = format!(",\"format\":\"{}\"", json_escape(&t.format)); let license_part = match &t.license { Some(v) => format!(",\"license\":\"{}\"", json_escape(v)), None => String::new() }; let source_part = match &t.source { Some(v) => format!(",\"source\":\"{}\"", json_escape(v)), None => String::new() }; body.push_str(&format!("{{\"id\":\"{}\",\"title\":\"{}\",\"artist\":\"{}\",\"durationSec\":{},\"sampleRate\":{},\"bitDepth\":{},\"bytes\":{},\"coverUrl\":\"/api/tracks/{}/cover\",\"streamUrl\":\"/api/tracks/{}/stream\"{}{}{}}}", t.id, json_escape(&t.title), json_escape(&t.artist), t.duration_sec, t.sample_rate, t.bit_depth, t.bytes, t.id, t.id, format_part, license_part, source_part)); }
             body.push(']');
             let mut extra = cors.clone(); extra.push(("Cache-Control".into(), "no-store".into()));
             if send_json(w, 200, &body, extra, head_only).await.is_err() { return; }
@@ -72,7 +72,7 @@ async fn handle(mut reader: BufReader<TcpStream>, ctx: Arc<Ctx>, _peer: SocketAd
             let track = ctx.tracks.iter().find(|t| t.id == id);
             match (track, action) {
                 (Some(t), "cover") => {
-                    let data = match tokio::fs::read(&t.cover).await { Ok(d) => d, Err(_) => { let _ = send_json(w, 500, "{\"error\":\"cover_missing\"}", cors.clone(), head_only).await; return; } };
+                    let data = match &t.cover { Some(path) => match tokio::fs::read(path).await { Ok(d) => d, Err(_) => { let _ = send_json(w, 500, "{\"error\":\"cover_missing\"}", cors.clone(), head_only).await; return; } }, None => generated_cover_svg(&t.title, &t.artist).into_bytes() };
                     let mut h = vec![("Content-Type".into(), "image/svg+xml".into()), ("Content-Length".into(), data.len().to_string())]; h.extend(cors.clone());
                     if write_head(w, 200, h).await.is_err() { return; } if !head_only && w.write_all(&data).await.is_err() { return; }
                 }
@@ -82,11 +82,11 @@ async fn handle(mut reader: BufReader<TcpStream>, ctx: Arc<Ctx>, _peer: SocketAd
                     else {
                         let (start, end, code) = if let Some(rh) = req.header("Range") { match range::parse_range(rh, t.bytes) { Ok(r) => (r.start, r.end, 206), Err(()) => { let mut extra = cors.clone(); extra.push(("Content-Range".into(), format!("bytes */{}", t.bytes))); extra.push(("Accept-Ranges".into(), "bytes".into())); if send_json(w, 416, "{\"error\":\"range_not_satisfiable\"}", extra, head_only).await.is_err() { return; } if !keep { return; } continue; } } } else { (0, t.bytes - 1, 200) };
                         let len = end - start + 1;
-                        let mut h = vec![("Content-Type".into(), "audio/wav".into()), ("Content-Length".into(), len.to_string()), ("Accept-Ranges".into(), "bytes".into()), ("ETag".into(), etag)]; if code == 206 { h.push(("Content-Range".into(), format!("bytes {}-{}/{}", start, end, t.bytes))); } h.extend(cors.clone());
+                        let mut h = vec![("Content-Type".into(), t.content_type().to_string()), ("Content-Length".into(), len.to_string()), ("Accept-Ranges".into(), "bytes".into()), ("ETag".into(), etag)]; if code == 206 { h.push(("Content-Range".into(), format!("bytes {}-{}/{}", start, end, t.bytes))); } h.extend(cors.clone());
                         if write_head(w, code, h).await.is_err() { return; }
                         if !head_only {
                             // Stream from disk in bounded chunks; stop on disconnect (write error).
-                            let mut stdf = match std::fs::File::open(&t.wav) { Ok(f) => f, Err(_) => return };
+                            let mut stdf = match std::fs::File::open(&t.file) { Ok(f) => f, Err(_) => return };
                             if stdf.seek(std::io::SeekFrom::Start(start)).is_err() { return; }
                             let mut file = tokio::fs::File::from_std(stdf);
                             let mut remaining = len; let mut buf = vec![0u8; 16384];
@@ -107,9 +107,14 @@ async fn main() {
     let token = match std::env::var("MUSIC_TOKEN") { Ok(v) if !v.is_empty() => v, _ => { eprintln!("error: MUSIC_TOKEN env var is required (no default)"); std::process::exit(2); } };
     let origin = std::env::var("MUSIC_ORIGIN").unwrap_or_else(|_| "http://localhost:5173".to_string());
     let port: u16 = std::env::var("MUSIC_PORT").ok().and_then(|v| v.parse().ok()).or_else(|| std::env::var("PORT").ok().and_then(|v| v.parse().ok())).unwrap_or(8080);
-    let data = std::env::var("MUSIC_DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("./data"));
-    let tracks = match ensure_library(&data) { Ok(t) => t, Err(e) => { eprintln!("error: cannot seed library: {}", e); std::process::exit(1); } };
-    let _ = &data; let ctx = Arc::new(Ctx { cfg: Arc::new(Config { token, origin }), tracks: Arc::new(tracks) });
+    let tracks = match std::env::var("MUSIC_MEDIA_DIR") {
+        Ok(v) if !v.is_empty() => match load_dir(&PathBuf::from(v)) { Ok(t) => t, Err(e) => { eprintln!("error: cannot load media library: {}", e); std::process::exit(1); } },
+        _ => {
+            let data = std::env::var("MUSIC_DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("./data"));
+            match ensure_library(&data) { Ok(t) => t, Err(e) => { eprintln!("error: cannot seed library: {}", e); std::process::exit(1); } }
+        }
+    };
+    let ctx = Arc::new(Ctx { cfg: Arc::new(Config { token, origin }), tracks: Arc::new(tracks) });
     let listener = match TcpListener::bind(("127.0.0.1", port)).await { Ok(l) => l, Err(e) => { eprintln!("error: bind {}: {}", port, e); std::process::exit(1); } };
     println!("music-server listening on http://127.0.0.1:{} ({} tracks)", port, ctx.tracks.len());
     let sem = Arc::new(Semaphore::new(256));
