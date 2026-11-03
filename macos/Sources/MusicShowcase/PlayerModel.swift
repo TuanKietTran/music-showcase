@@ -145,10 +145,23 @@ final class PlayerModel: ObservableObject {
 
     func handleFailure(_ error: Error?) {
         resumeAt = position
-        let code = ErrorCode.classifyPlayback(error)
-        playbackError = code
         isPlaying = false
         isBuffering = false
+        let first = ErrorCode.classifyPlayback(error)
+        if first != .serverError {
+            applyFailure(first)
+            return
+        }
+        // A 5xx may come from a proxy in front of a dead server: probe /api/health first.
+        let client = APIClient(baseURL: baseURL, token: token)
+        Task { [weak self] in
+            let healthy = await client.probeHealth()
+            self?.applyFailure(healthy ? .serverError : .connectionLostDuringPlayback)
+        }
+    }
+
+    private func applyFailure(_ code: ErrorCode) {
+        playbackError = code
         scheduleAutoRetry(for: code)
     }
 
