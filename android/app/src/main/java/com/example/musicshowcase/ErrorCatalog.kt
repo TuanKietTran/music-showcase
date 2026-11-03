@@ -3,7 +3,7 @@ package com.example.musicshowcase
 // Mirror of docs/error-catalog.json. UNCOMPILED: written without an Android toolchain.
 enum class ErrorCode(val id: String) {
     ServerUnreachable("server-unreachable"), RequestTimeout("request-timeout"),
-    Unauthorized("unauthorized"), UnauthorizedMidSession("unauthorized-mid-session"),
+    Unauthorized("unauthorized"), TokenRejected("token-rejected"), UnauthorizedMidSession("unauthorized-mid-session"),
     TrackNotFound("track-not-found"), BadRange("bad-range"), ServerError("server-error"),
     MalformedResponse("malformed-response"), AudioDecodeFailed("audio-decode-failed"),
     StreamStalled("stream-stalled"), ConnectionLostDuringPlayback("connection-lost-during-playback"),
@@ -23,6 +23,7 @@ val ErrorCode.entry: CatalogEntry
         ErrorCode.ServerUnreachable -> CatalogEntry("error", "Can't reach the server", "We couldn't connect to the music server. Check that it is running and that you are online, then try again.", listOf("retry", "change-server", "dismiss"), true, 3, NET, true)
         ErrorCode.RequestTimeout -> CatalogEntry("warning", "The server is taking too long", "The server didn't answer in time. Your library is still here. Try again in a moment.", listOf("retry", "dismiss"), true, 3, NET, false)
         ErrorCode.Unauthorized -> CatalogEntry("blocking", "Access token needed", "This server needs an access token before it will share music. Enter the token to continue.", listOf("enter-token", "change-server"), false, 0, emptyList(), true)
+        ErrorCode.TokenRejected -> CatalogEntry("warning", "That token wasn't accepted", "Check it and try again; it is the MUSIC_TOKEN the server was started with.", listOf("retry"), false, 0, emptyList(), true)
         ErrorCode.UnauthorizedMidSession -> CatalogEntry("blocking", "Please sign in again", "The server no longer accepts your token. Enter it again to keep listening. Your queue and position are kept.", listOf("enter-token", "dismiss"), false, 0, emptyList(), true)
         ErrorCode.TrackNotFound -> CatalogEntry("warning", "Track unavailable", "This track is no longer on the server, so we can't play it. You can skip to the next one.", listOf("skip-track", "dismiss"), false, 0, emptyList(), false)
         ErrorCode.BadRange -> CatalogEntry("warning", "Couldn't jump to that spot", "We couldn't seek to that point in the track. Playback restarts from where you were.", listOf("retry", "dismiss"), true, 1, listOf(500L), false)

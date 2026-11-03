@@ -63,6 +63,23 @@
   "announce": "assertive"
  },
  {
+  "code": "token-rejected",
+  "trigger": "the user submitted a non-empty token and the server answered 401",
+  "severity": "warning",
+  "surface": "inline-banner",
+  "title": "That token wasn't accepted",
+  "message": "Check it and try again; it is the MUSIC_TOKEN the server was started with.",
+  "actions": [
+   "retry"
+  ],
+  "retry": {
+   "auto": false,
+   "maxAttempts": 0,
+   "backoffMs": []
+  },
+  "announce": "assertive"
+ },
+ {
   "code": "unauthorized-mid-session",
   "trigger": "HTTP 401 after the library was loaded (token changed or expired)",
   "severity": "blocking",
