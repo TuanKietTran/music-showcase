@@ -1,4 +1,4 @@
-import { HttpError } from './errors';
+import { HttpError, classify, type ErrorCode } from './errors';
 export interface Track { id: string; title: string; artist: string; durationSec: number; sampleRate: number; bitDepth: number; bytes: number; coverUrl: string; streamUrl: string; }
 export class AuthError extends Error { constructor(message?: string) { super(message); this.name = 'AuthError'; } }
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -20,4 +20,14 @@ export function blobUrl(url: string, token: string): Promise<string> {
   let p = blobCache.get(key);
   if (!p) { p = fetch(url, { headers: auth(token) }).then(async (r) => { if (r.status === 401) throw new AuthError('unauthorized'); if (!r.ok) throw new HttpError(r.status); return URL.createObjectURL(await r.blob()); }).catch((e) => { blobCache.delete(key); throw e; }); blobCache.set(key, p); }
   return p;
+}
+// The dev proxy turns a refused connection into a 500, so a 5xx alone does not prove
+// the server answered. Probe /api/health (3 s timeout): if it fails, the server is unreachable.
+export async function probeHealth(): Promise<boolean> {
+  try { const r = await fetch('/api/health', { signal: AbortSignal.timeout(3000) }); return r.ok; } catch { return false; }
+}
+export async function classifyProbed(e: unknown, ctx?: { loaded?: boolean; playing?: boolean; tokenSubmitted?: boolean }): Promise<ErrorCode> {
+  const code = classify(e, ctx);
+  if (code !== 'server-error') return code;
+  return (await probeHealth()) ? code : ctx?.playing ? 'connection-lost-during-playback' : 'server-unreachable';
 }

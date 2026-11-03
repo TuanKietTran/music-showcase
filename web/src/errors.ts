@@ -1,5 +1,5 @@
 export type ErrorCode =
-  | "server-unreachable" | "request-timeout" | "unauthorized" | "unauthorized-mid-session"
+  | "server-unreachable" | "request-timeout" | "unauthorized" | "token-rejected" | "unauthorized-mid-session"
   | "track-not-found" | "bad-range" | "server-error" | "malformed-response"
   | "audio-decode-failed" | "stream-stalled" | "connection-lost-during-playback"
   | "cover-load-failed" | "empty-library" | "unknown";
@@ -18,6 +18,7 @@ export const CATALOG: Record<ErrorCode, CatalogEntry> = {
   "server-unreachable": { code: "server-unreachable", severity: "error", surface: "inline-banner", title: "Can't reach the server", message: "We couldn't connect to the music server. Check that it is running and that you are online, then try again.", actions: ["retry", "change-server", "dismiss"], retry: { auto: true, maxAttempts: 3, backoffMs: [1000, 2000, 4000] }, announce: "assertive" },
   "request-timeout": { code: "request-timeout", severity: "warning", surface: "inline-banner", title: "The server is taking too long", message: "The server didn't answer in time. Your library is still here. Try again in a moment.", actions: ["retry", "dismiss"], retry: { auto: true, maxAttempts: 3, backoffMs: [1000, 2000, 4000] }, announce: "polite" },
   "unauthorized": { code: "unauthorized", severity: "blocking", surface: "blocking-dialog", title: "Access token needed", message: "This server needs an access token before it will share music. Enter the token to continue.", actions: ["enter-token", "change-server"], retry: { auto: false, maxAttempts: 0, backoffMs: [] }, announce: "assertive" },
+  "token-rejected": { code: "token-rejected", severity: "warning", surface: "inline-banner", title: "That token wasn't accepted", message: "Check it and try again; it is the MUSIC_TOKEN the server was started with.", actions: ["retry"], retry: { auto: false, maxAttempts: 0, backoffMs: [] }, announce: "assertive" },
   "unauthorized-mid-session": { code: "unauthorized-mid-session", severity: "blocking", surface: "blocking-dialog", title: "Please sign in again", message: "The server no longer accepts your token. Enter it again to keep listening. Your queue and position are kept.", actions: ["enter-token", "dismiss"], retry: { auto: false, maxAttempts: 0, backoffMs: [] }, announce: "assertive" },
   "track-not-found": { code: "track-not-found", severity: "warning", surface: "toast", title: "Track unavailable", message: "This track is no longer on the server, so we can't play it. You can skip to the next one.", actions: ["skip-track", "dismiss"], retry: { auto: false, maxAttempts: 0, backoffMs: [] }, announce: "polite" },
   "bad-range": { code: "bad-range", severity: "warning", surface: "toast", title: "Couldn't jump to that spot", message: "We couldn't seek to that point in the track. Playback restarts from where you were.", actions: ["retry", "dismiss"], retry: { auto: true, maxAttempts: 1, backoffMs: [500] }, announce: "polite" },
@@ -31,9 +32,9 @@ export const CATALOG: Record<ErrorCode, CatalogEntry> = {
   "unknown": { code: "unknown", severity: "error", surface: "inline-banner", title: "Something went wrong", message: "Something unexpected happened. Try again, and your library and queue will stay as they are.", actions: ["retry", "dismiss"], retry: { auto: false, maxAttempts: 0, backoffMs: [] }, announce: "polite" },
 };
 export class HttpError extends Error { constructor(public status: number) { super('http') } }
-export function classify(e: unknown, ctx?: { loaded?: boolean; playing?: boolean }): ErrorCode {
+export function classify(e: unknown, ctx?: { loaded?: boolean; playing?: boolean; tokenSubmitted?: boolean }): ErrorCode {
   const name = (e as { name?: unknown } | null | undefined)?.name;
-  if (name === 'AuthError') return ctx?.loaded ? 'unauthorized-mid-session' : 'unauthorized';
+  if (name === 'AuthError') return ctx?.tokenSubmitted ? 'token-rejected' : ctx?.loaded ? 'unauthorized-mid-session' : 'unauthorized';
   const status = (e as { status?: unknown } | null | undefined)?.status;
   if (e instanceof HttpError || typeof status === 'number') {
     if (status === 401) return ctx?.loaded ? 'unauthorized-mid-session' : 'unauthorized';
