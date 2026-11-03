@@ -1,0 +1,12 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "WriteOwnPrefixOnly", "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:AbortMultipartUpload", "s3:DeleteObject"],
+      "Resource": "${bucket_arn}/accounts/$${aws:PrincipalTag/accountId}/*" },
+    { "Sid": "UseMediaKey", "Effect": "Allow", "Action": ["kms:GenerateDataKey", "kms:Decrypt"], "Resource": "${kms_arn}",
+      "Condition": { "StringEquals": { "kms:ViaService": "s3.${region}.amazonaws.com" } } },
+    { "Sid": "DenyWithoutAccountTag", "Effect": "Deny", "Action": "*", "Resource": "*",
+      "Condition": { "Null": { "aws:PrincipalTag/accountId": "true" } } }
+  ]
+}

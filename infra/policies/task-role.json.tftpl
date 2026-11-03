@@ -1,0 +1,12 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "ReadMediaObjects", "Effect": "Allow", "Action": "s3:GetObject", "Resource": "${bucket_arn}/accounts/*" },
+    { "Sid": "ListMediaBucket", "Effect": "Allow", "Action": "s3:ListBucket", "Resource": "${bucket_arn}" },
+    { "Sid": "ReadBucketEncryptionAtStartup", "Effect": "Allow", "Action": "s3:GetEncryptionConfiguration", "Resource": "${bucket_arn}" },
+    { "Sid": "DecryptMediaReads", "Effect": "Allow", "Action": "kms:Decrypt", "Resource": "${kms_arn}",
+      "Condition": { "StringEquals": { "kms:ViaService": "s3.${region}.amazonaws.com" } } },
+    { "Sid": "AssumeWriterWithAccountTag", "Effect": "Allow", "Action": ["sts:AssumeRole", "sts:TagSession"], "Resource": "${writer_role_arn}" },
+    { "Sid": "UploadIndex", "Effect": "Allow", "Action": ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Scan"], "Resource": "${table_arn}" }
+  ]
+}

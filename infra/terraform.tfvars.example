@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. scripts/aws-deploy.sh reads ~/.music-showcase/deploy.tfvars by default.
+region              = "<aws-region>"
+expected_account_id = "<12-digit id you confirmed>"
+budget_usd          = 0 # monthly cap
+alert_email         = "<you@example.com>"
+domain_zone         = "" # e.g. "example.com" for https://music.example.com, or "" for the CloudFront URL only
+subdomain           = "music"
+enable_waf          = false

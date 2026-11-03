@@ -1,3 +1,4 @@
+#![cfg_attr(not(any(feature = "aws", test)), allow(dead_code))] // the object API is only exercised by the S3 backend (feature aws) and the tests
 //! S3 backend logic, generic over a tiny object API so it can be tested with an in-memory fake.
 //! The real implementation is `s3_sdk::SdkObjects` (feature `aws`).
 use crate::storage::{parse_key, Attributes, Body, StoreError};

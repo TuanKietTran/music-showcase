@@ -45,15 +45,15 @@ Behaviour that follows: listeners can read public tracks and their own; uploader
 
 File `MUSIC_DATA_DIR/accounts.tsv` (tab separated, `#` comments): `id`, `name`, `role`, `status`, `quotaBytes`, `tokenSha256` (lowercase hex of SHA-256 of the bearer token). Tokens are never stored in clear. `music-server hash-token` reads a token from stdin and prints its hash (so it never appears in argv or shell history). Lookup hashes the presented token and compares in constant time over all accounts.
 
-Bootstrap: the env `MUSIC_TOKEN` stays required and maps to the built-in account `admin` (role `admin`, status `active`, no quota limit shown as `quotaBytes` 0 = unlimited). Existing clients keep working. Ids are `[a-z0-9_-]{1,32}`; `system` and `admin` are reserved for the built-ins. A missing accounts file means only the bootstrap admin exists.
+Bootstrap: the env `MUSIC_TOKEN` stays required and maps to the built-in account `admin` (role `admin`, status `active`, no quota limit shown as `quotaBytes` 0 = unlimited). Existing clients keep working. Ids are `[a-z0-9_-]{1,64}` (widened from 32 so an OIDC `sub` UUID can be an id verbatim); `system` and `admin` are reserved for the built-ins. A missing accounts file means only the bootstrap admin exists.
 
 ## 4. Storage
 
-A storage backend is an object store addressed by keys of the form `accounts/<ownerId>/<trackId>.<ext>`; this layout is also the S3 key layout, so an AWS prefix policy per account works unchanged. Operations: `put(key, body stream, length)`, `open(key)` (range-capable read), `delete(key)`, `stat(key)`, and `attributes()` (the `storage.*` values). The server code uses an enum `Storage { Local(..) }` (no async-trait crate); `S3` is added later by another session. Env `MUSIC_STORAGE` = `local` (default) or `s3`; `s3` is a startup error "s3 backend not available in this build" until implemented. `local` root: `MUSIC_DATA_DIR/objects` (default `./data/objects`), directories 0700, files 0600, writes go to a temp name then `rename`.
+A storage backend is an object store addressed by keys of the form `accounts/<ownerId>/<trackId>.<ext>`; this layout is also the S3 key layout, so an AWS prefix policy per account works unchanged. Operations: `put(key, body stream, length)`, `open(key)` (range-capable read), `delete(key)`, `stat(key)`, and `attributes()` (the `storage.*` values). The server code uses an enum `Storage { Local(..) }` (no async-trait crate); The `S3` variant is built with `--features aws` (see docs/aws.md). Env `MUSIC_STORAGE` = `local` (default) or `s3`; `s3` is a startup error "s3 backend not available in this build" when the binary was built without the `aws` feature, and also when the bucket's default encryption is not SSE-KMS/SSE-S3. `local` root: `MUSIC_DATA_DIR/objects` (default `./data/objects`), directories 0700, files 0600, writes go to a temp name then `rename`.
 
 Built-in tracks (MUSIC_MEDIA_DIR or synthesized) are read-only and are not stored in the Storage backend.
 
-Index: `MUSIC_DATA_DIR/uploads.tsv`, tab separated: `id`, `ownerId`, `visibility`, `title`, `artist`, `key`, `format`, `bytes`, `durationSec`, `createdAt`. Rewritten atomically (temp + rename) under a mutex on every change. Used bytes of an account = sum of its rows.
+Index: by default `MUSIC_DATA_DIR/uploads.tsv`; with env `MUSIC_DDB_TABLE` (feature `aws`) the same rows live in a DynamoDB table (`ownerId` partition key, `id` sort key) and the file is not used. Columns: tab separated: `id`, `ownerId`, `visibility`, `title`, `artist`, `key`, `format`, `bytes`, `durationSec`, `createdAt`. Rewritten atomically (temp + rename) under a mutex on every change. Used bytes of an account = sum of its rows.
 
 ## 5. API changes
 
@@ -72,7 +72,8 @@ All routes need a bearer token as before; the token now identifies an account. E
 - `DELETE /api/tracks/{id}` -> `204`; `decide(delete)`; removes the object and the index row.
 - `GET /api/tracks/{id}`, `/stream`, `/cover`: `decide(read|stream)`. A track the subject may not read answers `404 not_found` (same as a missing id; existence is not leaked). `403` is used only for actions on tracks the subject can already see (update/delete/upload).
 - Built-in tracks reject update/delete with `403`.
-- New JSON errors: `{error:"forbidden"}` 403, `{error:"upload_too_large"}` 413, `{error:"quota_exceeded"}` 403, `{error:"unsupported_media"}` 415, `{error:"length_required"}` 411. The response never names the failing rule; the server logs `ruleId` and account id (never the token) to stderr.
+- Authentication may also be a Cognito/OIDC JWT (feature `aws`, docs/aws.md); it maps to the same subject attributes. A subject-level `deny` (e.g. suspended) answers `403 forbidden` on every track route, not `404`.
+- New JSON errors: `{error:"forbidden"}` 403, `{error:"upload_too_large"}` 413, `{error:"quota_exceeded"}` 403, `{error:"unsupported_media"}` 415, `{error:"length_required"}` 411, plus `{error:"upload_failed"}` 500 (storage or index failure; nothing is kept), `{error:"storage_error"}` 500 and `{error:"server_busy"}` 503 (all upload slots in use). The response never names the failing rule; the server logs `ruleId` and account id (never the token) to stderr.
 - CORS: allowed methods now `GET, HEAD, POST, PATCH, DELETE, OPTIONS`.
 - Cover for an uploaded track: generated SVG as for tracks without art.
 

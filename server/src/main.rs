@@ -79,6 +79,17 @@ async fn main() {
         let mut s = String::new(); let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut s);
         println!("{}", sha256_hex(s.trim_end_matches(['\n', '\r']).as_bytes())); return;
     }
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") { // for container health checks in images without a shell or curl
+        let port: u16 = env("MUSIC_PORT").and_then(|v| v.parse().ok()).or_else(|| env("PORT").and_then(|v| v.parse().ok())).unwrap_or(8080);
+        let ok = async {
+            let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+            tokio::io::AsyncWriteExt::write_all(&mut s, b"GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await.ok()?;
+            let mut buf = Vec::new(); tokio::io::AsyncReadExt::read_to_end(&mut s, &mut buf).await.ok()?;
+            Some(buf.starts_with(b"HTTP/1.1 200"))
+        };
+        let healthy = matches!(tokio::time::timeout(Duration::from_secs(3), ok).await, Ok(Some(true)));
+        std::process::exit(if healthy { 0 } else { 1 });
+    }
     let token = env("MUSIC_TOKEN").unwrap_or_else(|| { eprintln!("error: MUSIC_TOKEN env var is required (no default)"); std::process::exit(2) });
     let origin = env("MUSIC_ORIGIN").unwrap_or_else(|| "http://localhost:5173".to_string());
     let port: u16 = env("MUSIC_PORT").and_then(|v| v.parse().ok()).or_else(|| env("PORT").and_then(|v| v.parse().ok())).unwrap_or(8080);

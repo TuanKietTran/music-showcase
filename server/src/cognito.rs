@@ -7,7 +7,7 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde_json::Value;
 use std::{collections::HashMap, sync::RwLock, time::{Duration, Instant}};
 
-pub struct Oidc { issuer: String, client_id: String, jwks_url: String, default_quota: u64, http: reqwest::Client, keys: RwLock<(HashMap<String, DecodingKey>, Option<Instant>)> }
+pub struct Oidc { issuer: String, client_id: String, jwks_url: String, default_quota: u64, deny: Vec<String>, http: reqwest::Client, keys: RwLock<(HashMap<String, DecodingKey>, Option<Instant>)> }
 
 impl Oidc {
     /// MUSIC_COGNITO_REGION + MUSIC_COGNITO_USER_POOL_ID + MUSIC_COGNITO_CLIENT_ID, or MUSIC_OIDC_ISSUER + MUSIC_OIDC_CLIENT_ID.
@@ -25,7 +25,7 @@ impl Oidc {
     }
     pub fn new(issuer: String, client_id: String, default_quota: u64) -> Oidc {
         let jwks_url = format!("{}/.well-known/jwks.json", issuer);
-        Oidc { issuer, client_id, jwks_url, default_quota, http: reqwest::Client::builder().timeout(Duration::from_secs(5)).build().expect("http client"), keys: RwLock::new((HashMap::new(), None)) }
+        Oidc { issuer, client_id, jwks_url, default_quota, deny: std::env::var("MUSIC_DENY_SUBJECTS").unwrap_or_default().split(',').map(|x| x.trim().to_ascii_lowercase()).filter(|x| !x.is_empty()).collect(), http: reqwest::Client::builder().timeout(Duration::from_secs(5)).build().expect("http client"), keys: RwLock::new((HashMap::new(), None)) }
     }
     #[cfg(test)]
     pub fn with_keys(issuer: &str, client_id: &str, keys: HashMap<String, DecodingKey>) -> Oidc { let o = Oidc::new(issuer.into(), client_id.into(), 1000); *o.keys.write().unwrap() = (keys, Some(Instant::now())); o }
@@ -60,7 +60,10 @@ impl Oidc {
             Some("access") if claims["client_id"].as_str() == Some(self.client_id.as_str()) => {}
             _ => return None,
         }
-        claims_to_account(&claims, self.default_quota)
+        let mut account = claims_to_account(&claims, self.default_quota)?;
+        // Emergency revocation: a JWT's claims are frozen until it expires, so ids listed in MUSIC_DENY_SUBJECTS are forced to `suspended`.
+        if self.deny.iter().any(|d| *d == account.id) { account.status = "suspended".into(); }
+        Some(account)
     }
 }
 
@@ -126,6 +129,12 @@ mod tests {
         let none = format!("{}.{}.", b64url(br#"{"alg":"none","typ":"JWT","kid":"k1"}"#), parts[1]); assert!(o.verify(&none).await.is_none(), "alg none");
         let hs = encode(&Header { kid: Some("k1".into()), ..Header::new(Algorithm::HS256) }, &id_claims(), &EncodingKey::from_secret(b"x")).unwrap(); assert!(o.verify(&hs).await.is_none(), "HS256 confusion");
         assert!(o.verify("a.b.c").await.is_none()); assert!(o.verify("garbage").await.is_none());
+    }
+    #[tokio::test] async fn deny_list_suspends_a_valid_token() {
+        let kp = keypair(); let mut o = oidc(&kp);
+        assert_eq!(o.verify(&sign(&kp, "k1", id_claims())).await.unwrap().status, "active");
+        o.deny = vec![SUB.to_string()];
+        assert_eq!(o.verify(&sign(&kp, "k1", id_claims())).await.unwrap().status, "suspended");
     }
     #[tokio::test] async fn accepts_access_token_by_client_id() {
         let kp = keypair(); let o = oidc(&kp);

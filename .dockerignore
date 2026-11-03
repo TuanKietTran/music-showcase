@@ -1,0 +1,9 @@
+**/target
+**/node_modules
+.git
+android
+macos
+web
+infra
+docs
+media

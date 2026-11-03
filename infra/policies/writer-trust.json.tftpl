@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Principal": { "AWS": "${task_role_arn}" }, "Action": ["sts:AssumeRole", "sts:TagSession"],
+      "Condition": {
+        "StringLike": { "aws:RequestTag/accountId": "?*" },
+        "ForAllValues:StringEquals": { "aws:TagKeys": ["accountId"] }
+      } }
+  ]
+}
