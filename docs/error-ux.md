@@ -15,9 +15,13 @@
 | info | toast or empty-state | auto-dismiss ~6 s, never steals focus |
 | warning | toast or inline-banner | stays until dismissed or resolved |
 | error | inline-banner | at the top of the affected area (library or player) |
-| blocking | blocking-dialog | only for 401; focus moves to the primary action |
+| blocking | blocking-dialog | only for 401; the token gate is shown after a 401 and never for any other library error (unreachable, timeout, 5xx show their banner). Focus moves to the primary action |
 
 The catalog's `surface` field is authoritative; this table explains the intent.
+
+`token-rejected` is a warning shown inline under the token form when the user submitted a non-empty token and got a 401 (assertive, no auto retry; its Try again action just refocuses the field). A 401 without a submitted token (first load, or a stale token mid-session) shows `unauthorized` / `unauthorized-mid-session` instead.
+
+Playback banners live inside the bottom player bar, as its first row above the controls, so they can never cover the transport buttons. The page reserves bottom padding equal to the bar height.
 
 ## Retry and backoff
 - `retry.auto` true: wait `backoffMs[n]` before attempt n+1, up to `maxAttempts`, then show the manual Retry action.
@@ -28,11 +32,13 @@ The catalog's `surface` field is authoritative; this table explains the intent.
 
 ## Playback state machine
 ```
-playing --buffer empty >5s--> stalled --auto retry--> retrying --ok--> playing
+playing --`waiting`/`stalled` for 5 s--> stalled --auto retry--> retrying --ok--> playing
 stalled/retrying --network lost--> retrying (connection-lost-during-playback)
 retrying --attempts exhausted--> failed (manual Retry / Skip shown)
 any --404 or decode error--> failed --skip-track--> playing (next) or skipped
 ```
+The 5 s timer starts on `waiting`/`stalled` (AVPlayer: `playbackStalled`) and is cleared by `playing`/`canplay`/pause (AVPlayer: time control status `playing`); only when it expires is `stream-stalled` shown (polite status, auto-resume per catalog).
+
 `skipped` means the track was passed over; the queue keeps it listed and marks it unavailable. Entering `failed` pauses audio, keeps position, keeps queue and library on screen.
 
 ## Accessibility
@@ -59,7 +65,8 @@ Rules: plain words, active voice, one next step, no exclamation marks, no blame.
 | HTTP | 401 (before library loaded / after) | unauthorized / unauthorized-mid-session |
 | HTTP | 404 | track-not-found |
 | HTTP | 416 | bad-range |
-| HTTP | 5xx | server-error |
+| HTTP | 5xx | server-error, but first probe `GET /api/health` (3 s timeout, no auth): if the probe fails (a proxy can turn a refused connection into a 5xx), use server-unreachable (library) or connection-lost-during-playback (playing) instead |
+| HTTP | 401 with a token the user just submitted | token-rejected |
 | JSON | `.json()` throws or wrong shape | malformed-response |
 | HTMLMediaElement | MediaError 2 (NETWORK) | connection-lost-during-playback |
 | HTMLMediaElement | MediaError 3 (DECODE), 4 (SRC_NOT_SUPPORTED) | audio-decode-failed |
@@ -67,8 +74,10 @@ Rules: plain words, active voice, one next step, no exclamation marks, no blame.
 | URLError | notConnectedToInternet, cannotConnectToHost, cannotFindHost, networkConnectionLost | server-unreachable (connection-lost-during-playback if playing) |
 | URLError | timedOut | request-timeout |
 | DecodingError | any | malformed-response |
+| AVPlayerItem | failed; underlying NSURLError network codes or timeout | connection-lost-during-playback |
+| AVPlayerItem | failed; underlying badServerResponse | server-error (after the same health probe) |
 | AVPlayerItem | failed with decode/format error | audio-decode-failed |
-| AVPlayerItem | playbackStalled notification | stream-stalled |
+| AVPlayerItem | playbackStalled notification, still not playing after 5 s | stream-stalled |
 | ExoPlayer | ERROR_CODE_IO_NETWORK_CONNECTION_*, TIMEOUT | connection-lost-during-playback / request-timeout |
 | ExoPlayer | ERROR_CODE_DECODING_*, PARSING_* | audio-decode-failed |
 | ExoPlayer | ERROR_CODE_IO_BAD_HTTP_STATUS | by status, as HTTP rows |
