@@ -4,6 +4,7 @@ enum ErrorCode: String, CaseIterable {
     case serverUnreachable = "server-unreachable"
     case requestTimeout = "request-timeout"
     case unauthorized = "unauthorized"
+    case tokenRejected = "token-rejected"
     case unauthorizedMidSession = "unauthorized-mid-session"
     case trackNotFound = "track-not-found"
     case badRange = "bad-range"
@@ -25,6 +26,7 @@ extension ErrorCode {
         case .serverUnreachable: return CatalogEntry(code: .serverUnreachable, severity: "error", surface: "inline-banner", title: "Can't reach the server", message: "We couldn't connect to the music server. Check that it is running and that you are online, then try again.", actions: ["retry", "change-server", "dismiss"], autoRetry: true, maxAttempts: 3, backoffMs: [1000, 2000, 4000], assertive: true, silent: false)
         case .requestTimeout: return CatalogEntry(code: .requestTimeout, severity: "warning", surface: "inline-banner", title: "The server is taking too long", message: "The server didn't answer in time. Your library is still here. Try again in a moment.", actions: ["retry", "dismiss"], autoRetry: true, maxAttempts: 3, backoffMs: [1000, 2000, 4000], assertive: false, silent: false)
         case .unauthorized: return CatalogEntry(code: .unauthorized, severity: "blocking", surface: "blocking-dialog", title: "Access token needed", message: "This server needs an access token before it will share music. Enter the token to continue.", actions: ["enter-token", "change-server"], autoRetry: false, maxAttempts: 0, backoffMs: [], assertive: true, silent: false)
+        case .tokenRejected: return CatalogEntry(code: .tokenRejected, severity: "warning", surface: "inline-banner", title: "That token wasn't accepted", message: "Check it and try again; it is the MUSIC_TOKEN the server was started with.", actions: ["retry"], autoRetry: false, maxAttempts: 0, backoffMs: [], assertive: true, silent: false)
         case .unauthorizedMidSession: return CatalogEntry(code: .unauthorizedMidSession, severity: "blocking", surface: "blocking-dialog", title: "Please sign in again", message: "The server no longer accepts your token. Enter it again to keep listening. Your queue and position are kept.", actions: ["enter-token", "dismiss"], autoRetry: false, maxAttempts: 0, backoffMs: [], assertive: true, silent: false)
         case .trackNotFound: return CatalogEntry(code: .trackNotFound, severity: "warning", surface: "toast", title: "Track unavailable", message: "This track is no longer on the server, so we can't play it. You can skip to the next one.", actions: ["skip-track", "dismiss"], autoRetry: false, maxAttempts: 0, backoffMs: [], assertive: false, silent: false)
         case .badRange: return CatalogEntry(code: .badRange, severity: "warning", surface: "toast", title: "Couldn't jump to that spot", message: "We couldn't seek to that point in the track. Playback restarts from where you were.", actions: ["retry", "dismiss"], autoRetry: true, maxAttempts: 1, backoffMs: [500], assertive: false, silent: false)
@@ -41,10 +43,10 @@ extension ErrorCode {
 }
 
 extension ErrorCode {
-    static func classify(_ error: Error, loaded: Bool = false, playing: Bool = false) -> ErrorCode {
+    static func classify(_ error: Error, loaded: Bool = false, playing: Bool = false, submitted: Bool = false) -> ErrorCode {
         if let e = error as? APIClientError {
             switch e {
-            case .unauthorized: return loaded ? .unauthorizedMidSession : .unauthorized
+            case .unauthorized: return submitted ? .tokenRejected : (loaded ? .unauthorizedMidSession : .unauthorized)
             case .http(let status): if status == 404 { return .trackNotFound }; if status == 416 { return .badRange }; if status >= 500 { return .serverError }; return .unknown
             }
         }

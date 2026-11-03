@@ -54,6 +54,16 @@ final class APIClient {
         self.init(baseURL: URL(string: baseURL) ?? URL(string: "http://localhost:8080")!, token: token)
     }
 
+    /// A 5xx can come from a proxy in front of a dead server, so probe GET /api/health
+    /// (3 s timeout, no auth). Returns false when the probe fails or does not answer 2xx.
+    func probeHealth() async -> Bool {
+        guard let url = URL(string: Track.resolve(baseURL: baseURL, path: "/api/health")) else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 3
+        guard let (_, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return false }
+        return (200...299).contains(http.statusCode)
+    }
+
     func tracks() async throws -> [Track] {
         // docs/api.md: the route is /api/tracks, not /tracks.
         guard let url = URL(string: Track.resolve(baseURL: baseURL, path: "/api/tracks")) else { throw URLError(.badURL) }
