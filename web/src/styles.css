@@ -5,10 +5,21 @@ header.site{display:flex;justify-content:space-between;align-items:center;paddin
 main{padding:0 var(--sp-6);display:grid;gap:var(--sp-6);max-width:1100px;margin:0 auto}
 .muted{color:var(--muted);font-size:var(--fs-sm)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--sp-4)}
-.card{background:var(--surface);border-radius:var(--r-lg);padding:var(--sp-3);text-align:left;width:100%}.card img,.np img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--r-md);background:var(--surface2)}.card h3{margin:var(--sp-2) 0 0;font-size:var(--fs-base)}.card[aria-current='true']{outline:2px solid var(--accent)}
-.np{background:var(--surface);border-radius:var(--r-lg);padding:var(--sp-4);display:grid;grid-template-columns:minmax(120px,280px) 1fr;gap:var(--sp-6)}@media(max-width:640px){.np{grid-template-columns:1fr}}
-.np h2{font-size:var(--fs-2xl);margin:0;line-height:1.15}.queue{list-style:none;margin:var(--sp-3) 0 0;padding:0;display:grid;gap:var(--sp-1)}.queue button{width:100%;text-align:left;background:transparent}.queue button:hover{background:var(--surface2)}
+.card{background:var(--surface);border-radius:var(--r-lg);padding:var(--sp-3);text-align:left;width:100%;position:relative;overflow:visible}.card img,.np img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--r-md);background:var(--surface2)}.card h3{margin:var(--sp-2) 0 0;font-size:var(--fs-base)}.card[aria-current='true']{outline:2px solid var(--accent)}
+.card .catno{display:block;font-family:var(--font-mono);font-size:var(--fs-xs);text-transform:uppercase;color:var(--muted);margin-top:var(--sp-1)}
+.card .peek{position:absolute;top:6%;right:0;width:38%;aspect-ratio:1;border-radius:var(--r-full);background:var(--surface2);border:2px solid var(--groove);transform:translateX(30%);opacity:0;transition:opacity var(--dur),transform var(--dur);z-index:-1}
+.card:hover .peek{opacity:1;transform:translateX(55%)}
+.np{background:repeating-radial-gradient(circle at 30% 40%,var(--groove) 0 1px,transparent 1px 6px),var(--surface);border-radius:var(--r-lg);padding:var(--sp-4);display:grid;grid-template-columns:minmax(120px,280px) 1fr;gap:var(--sp-6)}@media(max-width:640px){.np{grid-template-columns:1fr}}
+.np h2{font-family:var(--font-display);text-transform:uppercase;font-size:var(--fs-2xl);margin:0;line-height:1.15}
+.sleeve{position:relative;aspect-ratio:1;overflow:visible}
+.disc{position:relative;border-radius:var(--r-full);overflow:visible}
+.disc img{border-radius:var(--r-full);width:100%;aspect-ratio:1;object-fit:cover}
+.disc::after{content:'';position:absolute;inset:0;background:repeating-radial-gradient(circle,transparent 0 4px,var(--groove) 4px 5px);opacity:.5;border-radius:var(--r-full);pointer-events:none}
+.disc::before{content:'';position:absolute;top:50%;left:50%;width:26%;aspect-ratio:1;background:var(--accent);transform:translate(-50%,-50%);z-index:1;border-radius:var(--r-full);pointer-events:none}.queue{list-style:none;margin:var(--sp-3) 0 0;padding:0;display:grid;gap:var(--sp-1)}.queue button{width:100%;text-align:left;background:transparent}.queue button:hover{background:var(--surface2)}
+.sidelabel{font-family:var(--font-mono);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:var(--sp-3) 0 var(--sp-1)}
 .player{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--surface2);padding:var(--sp-3) var(--sp-6);display:grid;gap:var(--sp-2)}
+.thumb{width:40px;height:40px;border-radius:var(--r-full);object-fit:cover;flex-shrink:0}
+.mast-sub{font-family:var(--font-mono);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
 .player .row{display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap}.player .grow{flex:1;min-width:140px}
 .seekwrap{position:relative;flex:1;min-width:180px}.seekwrap input{width:100%}.buffered{position:absolute;left:0;top:-6px;height:4px;width:100%;pointer-events:none}.buffered i{position:absolute;height:4px;background:var(--muted);opacity:.55;border-radius:2px}
 .spinner{width:18px;height:18px;border:3px solid var(--surface2);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
