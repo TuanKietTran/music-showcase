@@ -1,0 +1,10 @@
+/* Sleeve slide-out: the spin animation owns transform on .disc.is-playing, so the playing slide uses margin-left (transitioned 450ms), while the non-playing hover slide uses transform via the .sleeve/.np hover context on .disc:not(.is-playing). */
+@keyframes spin{to{transform:rotate(360deg)}}
+.disc.is-playing{animation:spin var(--dur-spin) linear infinite;margin-left:10%}
+.thumb.is-playing{animation:spin var(--dur-spin) linear infinite}
+.sleeve{overflow:visible}
+.disc{will-change:transform;transition:transform 450ms ease,margin-left 450ms ease}
+.sleeve:hover .disc:not(.is-playing),.np:hover .disc:not(.is-playing){transform:translateX(14%)}
+@keyframes reveal{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.card{animation:reveal 320ms ease both;animation-delay:calc(var(--i, 0) * 70ms)}
+@media (prefers-reduced-motion: reduce){.disc,.thumb,.card{animation:none!important}.disc{transition:none!important}}
