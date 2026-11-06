@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PENPOT_FILE="${PENPOT_FILE:-$SCRIPT_DIR/vinyl-design-system.penpot}"
 PROJECT_NAME="${PENPOT_PROJECT_NAME:-Vinyl}"
-CREDS_FILE="${PENPOT_CREDS_FILE:-/Users/handlerone/Downloads/ruxt-lab/tmp/penpot/.credentials}"
+CREDS_FILE="${PENPOT_CREDS_FILE:-$HOME/Downloads/ruxt-lab/tmp/penpot/.credentials}"
 PROJECT_ID="${PENPOT_PROJECT_ID:-}"
 BASE_URL="${PENPOT_URL:-http://127.0.0.1:9001}"
 
@@ -105,5 +105,11 @@ if st == 404 and 'object-not-found' in body:
     st, body = import_file(project_id)
 if st < 200 or st >= 300:
     sys.exit(f'ERROR: import-binfile failed status={st} body={body[:500]}')
-print(f'IMPORT_OK status={st} project={project_name} project_id={project_id} file={penpot_file.name}')
+# import-binfile answers HTTP 200 with an SSE progress stream even on
+# failure; the stream, not the status, carries the verdict.
+if 'event: error' in body or '~:server-error' in body or '~:assertion' in body:
+    sys.exit(f'ERROR: import-binfile SSE error stream body={body[-500:]}')
+if 'event: end' not in body:
+    sys.exit(f'ERROR: import-binfile stream did not end with event: end body={body[-500:]}')
+print(f'IMPORT_OK status={st} sse=event:end project={project_name} project_id={project_id} file={penpot_file.name}')
 PY
